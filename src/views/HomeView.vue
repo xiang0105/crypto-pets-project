@@ -1,9 +1,1128 @@
 <script setup lang="ts">
-import TheWelcome from '../components/TheWelcome.vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { pets } from '@/data/pets'
+import boboImage from '@/assets/capybaras/bobo.png'
+import capySanImage from '@/assets/capybaras/capy-san.png'
+import kokoImage from '@/assets/capybaras/koko.png'
+import yuzuBoyImage from '@/assets/capybaras/yuzu-boy.png'
+import yuzuBiteOne from '@/assets/goodies/yuzu-bite-1.png'
+import yuzuBiteTwo from '@/assets/goodies/yuzu-bite-2.png'
+import yuzuBiteThree from '@/assets/goodies/yuzu-bite-3.png'
+import yuzuBiteFour from '@/assets/goodies/yuzu-bite-4.png'
+import orangeMap from '@/assets/map/orange.png'
+import { isZh } from '@/i18n'
+
+const elementMeta = {
+  citrus: {
+    mark: 'C',
+    label: { zh: '柑橘', en: 'Citrus' },
+    className: 'is-citrus',
+  },
+  ember: {
+    mark: 'E',
+    label: { zh: '火焰', en: 'Ember' },
+    className: 'is-ember',
+  },
+  frost: {
+    mark: 'F',
+    label: { zh: '冰霜', en: 'Frost' },
+    className: 'is-frost',
+  },
+  bloom: {
+    mark: 'B',
+    label: { zh: '花園', en: 'Bloom' },
+    className: 'is-bloom',
+  },
+}
+
+const text = computed(() => ({
+  activeExpedition: isZh.value ? '遠征任務' : 'ACTIVE EXPEDITION',
+  missionName: isZh.value ? '遠古森林任務' : 'Ancient Forest Mission',
+  progress: isZh.value ? '進度' : 'PROGRESS',
+  progressValue: isZh.value ? '第 7 / 14 天' : 'Day 7/14',
+  nextEvent: isZh.value ? '下一事件' : 'NEXT EVENT',
+  nextEventValue: isZh.value ? '尋找巨大柚子！(1 小時 12 分)' : 'Find the Gigantic Yuzu! (1h 12m)',
+  goal: isZh.value ? '目標' : 'GOAL',
+  goalValue: isZh.value ? '金色毛球（剩餘 7 天）' : 'Golden Pompom (7 days left)',
+  currentStatus: isZh.value ? '目前狀態' : 'Current Status',
+  expeditionLog: isZh.value ? '遠征紀錄' : 'EXPEDITION LOG',
+  partyTitle: isZh.value ? '寵物隊伍能力總覽' : 'PET PARTY STATS & OVERVIEW',
+  level: isZh.value ? '等級' : 'Lv.',
+  hp: isZh.value ? '生命' : 'HP',
+  exp: isZh.value ? '經驗' : 'EXP',
+}))
+
+const petImages: Record<string, string> = {
+  'PET-001': capySanImage,
+  'PET-002': yuzuBoyImage,
+  'PET-003': kokoImage,
+  'PET-004': boboImage,
+}
+
+const fruitFrames = [yuzuBiteOne, yuzuBiteTwo, yuzuBiteThree, yuzuBiteFour]
+
+const fruitFrameIndex = ref(0)
+let fruitTimer: number | undefined
+let fruitCycleStarted = 0
+const fruitCycleDuration = 12800
+
+const fruitImage = computed(() => fruitFrames[fruitFrameIndex.value])
+
+function syncFruitFrame() {
+  const progress = ((performance.now() - fruitCycleStarted) % fruitCycleDuration) / fruitCycleDuration
+
+  if (progress < 0.49) {
+    fruitFrameIndex.value = 0
+  } else if (progress < 0.58) {
+    fruitFrameIndex.value = 1
+  } else if (progress < 0.68) {
+    fruitFrameIndex.value = 2
+  } else {
+    fruitFrameIndex.value = 3
+  }
+}
+
+onMounted(() => {
+  fruitCycleStarted = performance.now()
+  syncFruitFrame()
+  fruitTimer = window.setInterval(syncFruitFrame, 120)
+})
+
+onUnmounted(() => {
+  if (fruitTimer) {
+    window.clearInterval(fruitTimer)
+  }
+})
 </script>
 
 <template>
-  <main>
-    <TheWelcome />
-  </main>
+  <section class="expedition-page">
+    <div class="happy-background" aria-hidden="true">
+      <FontAwesomeIcon class="bg-icon apple bg-one" icon="apple-whole" />
+      <FontAwesomeIcon class="bg-icon orange bg-two" icon="lemon" />
+      <FontAwesomeIcon class="bg-icon leaf bg-three" icon="leaf" />
+      <FontAwesomeIcon class="bg-icon star bg-four" icon="star" />
+      <FontAwesomeIcon class="bg-icon cloud bg-five" icon="cloud" />
+      <FontAwesomeIcon class="bg-icon sun bg-six" icon="sun" />
+      <FontAwesomeIcon class="bg-icon apple bg-seven" icon="apple-whole" />
+      <FontAwesomeIcon class="bg-icon orange bg-eight" icon="lemon" />
+      <FontAwesomeIcon class="bg-icon leaf bg-nine" icon="leaf" />
+      <FontAwesomeIcon class="bg-icon star bg-ten" icon="star" />
+    </div>
+
+    <div class="expedition-grid">
+      <section class="animation-panel" aria-label="Capybara party exploring a forest">
+        <div class="forest-scene" :style="{ '--scene-map': `url(${orangeMap})` }">
+          <div class="mission-header">
+            <strong>{{ text.activeExpedition }}:</strong>
+            <span>{{ text.missionName }}</span>
+          </div>
+          <div class="sunbeam"></div>
+          <div class="castle"></div>
+          <div class="tree tree-left"></div>
+          <div class="tree tree-right"></div>
+          <div class="path"></div>
+          <div class="snack-fruit" aria-hidden="true">
+            <img class="fruit-frame" :src="fruitImage" alt="" draggable="false" />
+          </div>
+          <div class="party-row">
+            <div
+              v-for="(pet, index) in pets"
+              :key="pet.id"
+              class="scene-pet"
+              :style="{ '--pet-index': index }"
+            >
+              <img
+                class="scene-pet-avatar"
+                :class="pet.element"
+                :src="petImages[pet.id]"
+                :alt="`${pet.name} capybara`"
+                draggable="false"
+              />
+            </div>
+          </div>
+          <div class="mission-footer">
+            <div class="mission-stat progress-stat">
+              <strong>{{ text.progress }}:</strong>
+              <span>{{ text.progressValue }}</span>
+              <div class="quest-progress" aria-label="Expedition progress">
+                <i></i>
+              </div>
+            </div>
+            <div class="mission-stat">
+              <strong>{{ text.nextEvent }}:</strong>
+              <span>{{ text.nextEventValue }}</span>
+            </div>
+            <div class="mission-stat">
+              <strong>{{ text.goal }}:</strong>
+              <span>{{ text.goalValue }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="status-panel">
+        <h2>{{ text.currentStatus }}</h2>
+        <div class="log-sheet">
+          <div class="binder">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <h3>{{ text.expeditionLog }}</h3>
+          <div class="log-lines" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <section class="party-panel">
+      <h2><span></span> {{ text.partyTitle }} <span></span></h2>
+
+      <div class="pet-list">
+        <article
+          v-for="pet in pets"
+          :key="pet.id"
+          class="pet-card"
+          :class="elementMeta[pet.element].className"
+        >
+          <header>
+            <strong><em>{{ elementMeta[pet.element].mark }}</em> {{ pet.name }}</strong>
+            <small>{{ isZh ? elementMeta[pet.element].label.zh : elementMeta[pet.element].label.en }}</small>
+          </header>
+
+          <div class="pet-body">
+            <div class="portrait">
+              <img :src="petImages[pet.id]" :alt="`${pet.name} portrait`" draggable="false" />
+            </div>
+
+            <div class="meter-block">
+              <div class="level-row">
+                <span>{{ text.level }}</span>
+                <strong>{{ pet.stage * 10 + pet.stats.iv % 10 }}</strong>
+              </div>
+              <div class="meter">
+                <span>{{ text.hp }}:</span>
+                <div><i :style="{ width: `${(pet.stats.hp / pet.stats.maxHp) * 100}%` }"></i></div>
+                <b>{{ pet.stats.hp }}/{{ pet.stats.maxHp }}</b>
+              </div>
+              <div class="meter mana">
+                <span>{{ text.exp }}:</span>
+                <div><i :style="{ width: `${(pet.exp.current / pet.exp.next) * 100}%` }"></i></div>
+                <b>{{ pet.exp.current }}/{{ pet.exp.next }}</b>
+              </div>
+            </div>
+          </div>
+
+          <dl class="stat-grid">
+            <div>
+              <dt>IV</dt>
+              <dd>{{ pet.stats.iv }}</dd>
+            </div>
+            <div>
+              <dt>ATK</dt>
+              <dd>{{ pet.stats.atk }}</dd>
+            </div>
+            <div>
+              <dt>DEF</dt>
+              <dd>{{ pet.stats.def }}</dd>
+            </div>
+            <div>
+              <dt>ID</dt>
+              <dd>{{ pet.id }}</dd>
+            </div>
+          </dl>
+        </article>
+      </div>
+    </section>
+  </section>
 </template>
+
+<style scoped>
+.expedition-page {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 14px;
+  width: min(1500px, 100%);
+  height: 100%;
+  margin: 0 auto;
+  color: #513924;
+}
+
+.expedition-page::before {
+  position: absolute;
+  z-index: 0;
+  inset: -28px -8px 0;
+  pointer-events: none;
+  content: '';
+  opacity: 0.9;
+  background:
+    radial-gradient(circle at 32px 50px, #f2a64c 0 18px, #79a95b 19px 22px, transparent 23px),
+    radial-gradient(circle at 42px 188px, #7ec9e2 0 18px, #4f9caf 19px 22px, transparent 23px),
+    radial-gradient(circle at 35px 330px, #f1a7bc 0 18px, #bf7892 19px 22px, transparent 23px),
+    radial-gradient(circle at calc(100% - 32px) 50px, #f2a64c 0 18px, #79a95b 19px 22px, transparent 23px),
+    radial-gradient(circle at calc(100% - 42px) 188px, #7ec9e2 0 18px, #4f9caf 19px 22px, transparent 23px),
+    radial-gradient(circle at calc(100% - 35px) 330px, #f1a7bc 0 18px, #bf7892 19px 22px, transparent 23px),
+    radial-gradient(circle at 50% calc(100% - 24px), rgba(242, 166, 76, 0.22) 0 10px, transparent 11px),
+    radial-gradient(circle at 58% calc(100% - 58px), rgba(126, 201, 226, 0.2) 0 12px, transparent 13px),
+    radial-gradient(circle at 42% calc(100% - 58px), rgba(241, 167, 188, 0.2) 0 12px, transparent 13px),
+    linear-gradient(90deg, rgba(206, 154, 78, 0.45) 0 3px, transparent 3px calc(100% - 3px), rgba(206, 154, 78, 0.45) calc(100% - 3px));
+}
+
+.expedition-grid,
+.party-panel {
+  position: relative;
+  z-index: 2;
+}
+
+.happy-background {
+  position: absolute;
+  inset: -20px 0 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.bg-icon {
+  position: absolute;
+  display: block;
+  opacity: 0.72;
+  filter: drop-shadow(0 2px 0 rgba(107, 82, 45, 0.16));
+  animation:
+    icon-bob 7s ease-in-out infinite,
+    icon-drift 18s linear infinite;
+}
+
+.apple {
+  color: #df6b55;
+}
+
+.orange {
+  color: #f2a64c;
+}
+
+.leaf {
+  color: #75a85b;
+}
+
+.star {
+  color: #eec95d;
+}
+
+.cloud {
+  color: #a9dbe6;
+}
+
+.sun {
+  color: #f0b84e;
+}
+
+.bg-one {
+  top: 26px;
+  left: 2.5%;
+  font-size: 42px;
+}
+
+.bg-two {
+  top: 128px;
+  left: 5%;
+  font-size: 34px;
+  animation-delay: -2s, -4s;
+}
+
+.bg-three {
+  top: 38px;
+  right: 5%;
+  font-size: 38px;
+  animation-delay: -4s, -8s;
+}
+
+.bg-four {
+  top: 172px;
+  right: 2.5%;
+  font-size: 30px;
+  animation-delay: -1s, -2s;
+}
+
+.bg-five {
+  right: 6%;
+  bottom: 74px;
+  font-size: 54px;
+  animation-delay: -3s, -9s;
+}
+
+.bg-six {
+  bottom: 72px;
+  left: 6%;
+  font-size: 46px;
+  animation-delay: -5s, -12s;
+}
+
+.bg-seven {
+  top: 292px;
+  left: 1.5%;
+  font-size: 34px;
+  animation-delay: -6s, -6s;
+}
+
+.bg-eight {
+  right: 1.5%;
+  bottom: 200px;
+  font-size: 40px;
+  animation-delay: -7s, -14s;
+}
+
+.bg-nine {
+  bottom: 18px;
+  left: 32%;
+  font-size: 30px;
+  animation-delay: -2.5s, -10s;
+}
+
+.bg-ten {
+  right: 32%;
+  bottom: 18px;
+  font-size: 28px;
+  animation-delay: -4.5s, -7s;
+}
+
+@keyframes icon-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-3deg);
+  }
+
+  50% {
+    transform: translateY(-12px) rotate(5deg);
+  }
+}
+
+@keyframes icon-drift {
+  from {
+    margin-left: 0;
+  }
+
+  to {
+    margin-left: 18px;
+  }
+}
+
+@keyframes pet-journey {
+  0%,
+  32% {
+    transform: translateX(var(--walk-x)) translateY(2px) scale(0.96);
+  }
+
+  39%,
+  75% {
+    transform: translateX(var(--gather-x)) translateY(0) scale(1);
+  }
+
+  82%,
+  100% {
+    transform: translateX(var(--walk-x)) translateY(2px) scale(0.96);
+  }
+}
+
+@keyframes pet-waddle {
+  from {
+    transform: translateY(0) rotate(-2.5deg);
+  }
+
+  to {
+    transform: translateY(-5px) rotate(2.5deg);
+  }
+}
+
+@keyframes fruit-meal {
+  0%,
+  36% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(12px) scale(0.72) rotate(-8deg);
+  }
+
+  40%,
+  75% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1) rotate(0deg);
+  }
+
+  82%,
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px) scale(0.7) rotate(8deg);
+  }
+}
+
+.expedition-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 430px;
+  gap: 24px;
+  min-height: 0;
+}
+
+.animation-panel {
+  display: block;
+  min-height: 0;
+  overflow: hidden;
+  background: #182d29;
+  border: 4px solid #fff2c8;
+  border-radius: 8px;
+  box-shadow: 0 0 0 3px #c58d5a;
+}
+
+.forest-scene {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 248, 218, 0.04), rgba(33, 49, 32, 0.12)),
+    var(--scene-map) center / cover no-repeat,
+    #9bd99d;
+}
+
+.mission-header {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 7px 18px 9px;
+  color: #fff5d1;
+  font-size: clamp(20px, 2vw, 30px);
+  font-weight: 900;
+  line-height: 1;
+  background: rgba(37, 29, 24, 0.74);
+  border-bottom: 3px solid rgba(255, 230, 160, 0.45);
+}
+
+.mission-header strong {
+  color: #ffd36a;
+}
+
+.forest-scene::before,
+.forest-scene::after {
+  content: none;
+}
+
+.sunbeam {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 20%, rgba(255, 255, 255, 0.18) 50%, transparent 70%);
+}
+
+.castle {
+  display: none;
+}
+
+.tree {
+  display: none;
+}
+
+.tree::before {
+  content: none;
+}
+
+.tree-left {
+  left: 2%;
+  transform: rotate(5deg);
+}
+
+.tree-right {
+  right: 3%;
+  transform: rotate(-5deg);
+}
+
+.path {
+  display: none;
+}
+
+.party-row {
+  position: absolute;
+  right: 0;
+  bottom: 72px;
+  left: 0;
+  z-index: 4;
+  height: 120px;
+}
+
+.mission-footer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 8;
+  display: grid;
+  grid-template-columns: 1fr 1.15fr 1fr;
+  gap: 14px;
+  padding: 12px 30px 13px;
+  color: #fff5d1;
+  background: rgba(28, 26, 24, 0.76);
+  border-top: 3px solid rgba(255, 230, 160, 0.42);
+}
+
+.mission-stat {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding-left: 16px;
+  border-left: 2px solid rgba(255, 245, 209, 0.4);
+}
+
+.mission-stat:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.mission-stat strong {
+  color: #ffd36a;
+  font-size: clamp(15px, 1.5vw, 22px);
+  font-weight: 1000;
+  line-height: 1;
+}
+
+.mission-stat span {
+  overflow: hidden;
+  font-size: clamp(13px, 1.3vw, 19px);
+  font-weight: 900;
+  line-height: 1.12;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-stat {
+  grid-template-columns: auto 1fr;
+  column-gap: 6px;
+}
+
+.progress-stat .quest-progress {
+  grid-column: 1 / -1;
+}
+
+.quest-progress {
+  height: 17px;
+  overflow: hidden;
+  background: #3e2c25;
+  border: 3px solid #f3dfb5;
+  border-radius: 999px;
+}
+
+.quest-progress i {
+  display: block;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(90deg, #67e979, #42bd65);
+  border-radius: inherit;
+}
+
+.scene-pet {
+  --walk-x: 0px;
+  --gather-x: 0px;
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  display: grid;
+  place-items: end center;
+  transform-origin: center bottom;
+  animation: pet-journey 12.8s ease-in-out infinite;
+}
+
+.scene-pet:nth-child(1) {
+  --walk-x: -230px;
+  --gather-x: -210px;
+}
+
+.scene-pet:nth-child(2) {
+  --walk-x: -78px;
+  --gather-x: -78px;
+  bottom: 4px;
+}
+
+.scene-pet:nth-child(3) {
+  --walk-x: 78px;
+  --gather-x: 70px;
+}
+
+.scene-pet:nth-child(4) {
+  --walk-x: 220px;
+  --gather-x: 198px;
+  bottom: 6px;
+}
+
+.scene-pet-avatar {
+  width: 132px;
+  height: auto;
+  object-fit: contain;
+  user-select: none;
+  filter: drop-shadow(0 4px 0 rgba(64, 43, 36, 0.18));
+  animation: pet-waddle 720ms ease-in-out infinite alternate;
+}
+
+.scene-pet:nth-child(2) .scene-pet-avatar {
+  animation-delay: -0.18s;
+}
+
+.scene-pet:nth-child(3) .scene-pet-avatar {
+  animation-delay: -0.34s;
+}
+
+.scene-pet:nth-child(4) .scene-pet-avatar {
+  animation-delay: -0.52s;
+}
+
+.snack-fruit {
+  position: absolute;
+  bottom: 90px;
+  left: 13%;
+  z-index: 5;
+  width: 94px;
+  height: 125px;
+  opacity: 1;
+  filter: drop-shadow(0 5px 0 rgba(53, 91, 54, 0.18));
+  transform: translateX(-50%);
+  transform-origin: center bottom;
+  animation: fruit-meal 12.8s ease-in-out infinite;
+}
+
+.fruit-frame {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+.status-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 12px;
+  background: #72c5b4;
+  border: 4px solid #4b8e82;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.38);
+}
+
+.status-panel h2 {
+  margin: -4px 0 8px;
+  color: #fff7df;
+  font-size: 18px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.log-sheet {
+  position: relative;
+  min-height: 0;
+  padding: 42px 28px 22px;
+  background: linear-gradient(90deg, transparent 0 22px, #e9aaa1 22px 24px, transparent 24px), #fff7df;
+  border: 3px solid #9a7045;
+  border-radius: 8px 8px 20px 8px;
+}
+
+.binder {
+  position: absolute;
+  top: -15px;
+  right: 28px;
+  left: 28px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.binder span {
+  width: 10px;
+  height: 28px;
+  background: #dce8f0;
+  border: 3px solid #6d8d9b;
+  border-radius: 8px;
+}
+
+.log-sheet h3 {
+  margin: 0 0 22px;
+  color: #80522e;
+  font-size: 18px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.log-lines {
+  display: grid;
+  gap: 18px;
+  padding-left: 20px;
+}
+
+.log-lines span {
+  display: block;
+  height: 2px;
+  background: #c9e4d9;
+}
+
+.party-panel {
+  margin-top: 0;
+  padding: 12px 16px 14px;
+  background: #ffe4bc;
+  border: 3px solid #b7834e;
+  border-radius: 8px;
+}
+
+.party-panel h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  color: #6f4228;
+  font-size: 20px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.party-panel h2 span {
+  height: 2px;
+  flex: 1;
+  background: #d2a46d;
+}
+
+.pet-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pet-card {
+  overflow: hidden;
+  background: #f7f2c8;
+  border: 3px solid #6ca765;
+  border-radius: 8px;
+}
+
+.pet-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+  padding: 4px 8px;
+  background: #b9de94;
+}
+
+.pet-card strong,
+.pet-card small {
+  font-weight: 900;
+}
+
+.pet-card strong em {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  margin-right: 3px;
+  color: #fff7df;
+  font-size: 11px;
+  font-style: normal;
+  background: #dd8c36;
+  border-radius: 999px;
+}
+
+.pet-card small {
+  color: rgba(81, 57, 36, 0.72);
+}
+
+.pet-body {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 9px;
+  padding: 8px;
+}
+
+.portrait {
+  display: grid;
+  place-items: center;
+  min-height: 84px;
+  overflow: hidden;
+  background: #f6e8bd;
+  border: 3px solid #f4e6c1;
+  border-radius: 4px;
+}
+
+.portrait img {
+  display: block;
+  width: 96%;
+  height: 96%;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 0 rgba(64, 43, 36, 0.16));
+  user-select: none;
+}
+
+.level-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.meter {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 5px;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.meter div {
+  position: relative;
+  height: 13px;
+  overflow: hidden;
+  background: #5f5f5f;
+  border-radius: 8px;
+}
+
+.meter i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(#ef7773, #be3131);
+}
+
+.meter.mana i {
+  background: linear-gradient(#65c9ff, #2585c7);
+}
+
+.meter b {
+  grid-column: 2;
+  margin-top: -20px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 10px;
+  padding: 0 8px 8px;
+  margin: 0;
+}
+
+.stat-grid div {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 6px;
+  background: rgba(255, 255, 255, 0.45);
+  border-radius: 5px;
+}
+
+.stat-grid dt,
+.stat-grid dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.pet-card.is-ember {
+  border-color: #da8750;
+}
+
+.pet-card.is-ember header {
+  background: #ffb58d;
+}
+
+.pet-card.is-ember strong em {
+  background: #d95c2a;
+}
+
+.pet-card.is-frost {
+  border-color: #63a9ba;
+}
+
+.pet-card.is-frost header {
+  background: #a9dbe6;
+}
+
+.pet-card.is-frost strong em {
+  background: #4b9fc2;
+}
+
+.pet-card.is-bloom {
+  border-color: #c37db8;
+}
+
+.pet-card.is-bloom header {
+  background: #e8b4dd;
+}
+
+.pet-card.is-bloom strong em {
+  background: #c66aa9;
+}
+
+@media (max-width: 980px) {
+  .expedition-grid,
+  .pet-list {
+    grid-template-columns: 1fr;
+  }
+
+  .expedition-page::before,
+  .expedition-page::after {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .expedition-page {
+    display: block;
+    width: 100%;
+    height: auto;
+    min-height: 100%;
+  }
+
+  .happy-background {
+    position: fixed;
+    inset: 118px 0 0;
+  }
+
+  .bg-icon {
+    opacity: 0.34;
+  }
+
+  .expedition-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .animation-panel {
+    height: 270px;
+    min-height: 270px;
+    border-width: 3px;
+    border-radius: 9px;
+  }
+
+  .forest-scene {
+    height: 100%;
+    background-position: center;
+  }
+
+  .mission-header {
+    min-height: 34px;
+    padding: 6px 10px;
+    font-size: 16px;
+  }
+
+  .mission-footer {
+    grid-template-columns: 1fr 1.1fr 1fr;
+    gap: 6px;
+    padding: 7px 8px 8px;
+  }
+
+  .mission-stat {
+    gap: 2px;
+    padding-left: 6px;
+  }
+
+  .mission-stat strong {
+    font-size: 11px;
+  }
+
+  .mission-stat span {
+    font-size: 10px;
+  }
+
+  .quest-progress {
+    height: 12px;
+    border-width: 2px;
+  }
+
+  .party-row {
+    bottom: 44px;
+    height: 82px;
+  }
+
+  .scene-pet-avatar {
+    width: 78px;
+  }
+
+  .scene-pet:nth-child(1) {
+    --walk-x: -116px;
+    --gather-x: -116px;
+  }
+
+  .scene-pet:nth-child(2) {
+    --walk-x: -38px;
+    --gather-x: -38px;
+  }
+
+  .scene-pet:nth-child(3) {
+    --walk-x: 38px;
+    --gather-x: 38px;
+  }
+
+  .scene-pet:nth-child(4) {
+    --walk-x: 112px;
+    --gather-x: 112px;
+  }
+
+  .snack-fruit {
+    bottom: 58px;
+    left: 12%;
+    width: 62px;
+    height: 84px;
+  }
+
+  .status-panel {
+    min-height: 230px;
+    padding: 9px;
+    border-width: 3px;
+  }
+
+  .status-panel h2 {
+    font-size: 15px;
+  }
+
+  .log-sheet {
+    min-height: 185px;
+    padding: 34px 18px 16px;
+  }
+
+  .log-sheet h3 {
+    margin-bottom: 18px;
+    font-size: 16px;
+  }
+
+  .party-panel {
+    margin-top: 12px;
+    padding: 10px;
+  }
+
+  .party-panel h2 {
+    gap: 7px;
+    font-size: 16px;
+  }
+
+  .pet-list {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .pet-body {
+    grid-template-columns: 84px 1fr;
+  }
+
+  .portrait {
+    min-height: 80px;
+  }
+}
+</style>
