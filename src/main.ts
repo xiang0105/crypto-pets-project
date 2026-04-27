@@ -12,8 +12,10 @@ import {
   faCircleQuestion,
   faLeaf,
   faLemon,
+  faMusic,
   faStar,
   faSun,
+  faVolumeXmark,
   faWallet,
   faXmark,
 } from '@fortawesome/free-solid-svg-icons'
@@ -30,8 +32,10 @@ library.add(
   faCircleQuestion,
   faLeaf,
   faLemon,
+  faMusic,
   faStar,
   faSun,
+  faVolumeXmark,
   faWallet,
   faXmark,
 )

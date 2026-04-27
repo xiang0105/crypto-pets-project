@@ -33,3 +33,13 @@ a,
     width: 100%;
   }
 }
+
+@media (max-width: 1199px) {
+  html,
+  body,
+  #app {
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+}

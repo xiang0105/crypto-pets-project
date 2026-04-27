@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import { isZh, locale, toggleLocale } from './i18n'
 import readmeContent from '../README.md?raw'
+import backgroundMusicUrl from '@/assets/music/Capybara_Meadow.mp3'
 
 const menuItems = computed(() => [
   { label: isZh.value ? '首頁' : 'Home', to: '/' },
@@ -12,6 +13,7 @@ const menuItems = computed(() => [
 ])
 
 const actionItems = [
+  { label: '背景音樂', icon: 'music' },
   { label: '說明', icon: 'circle-question' },
   { label: '錢包', icon: 'wallet' },
   { label: '顏色對調', icon: 'circle-half-stroke' },
@@ -19,6 +21,9 @@ const actionItems = [
 
 const isMonoMode = ref(false)
 const isHelpPanelOpen = ref(false)
+const isMusicEnabled = ref(false)
+const isMusicPlaying = ref(false)
+const backgroundMusic = ref<HTMLAudioElement | null>(null)
 const walletAddress = ref('')
 const walletError = ref('')
 const route = useRoute()
@@ -33,6 +38,8 @@ const markdown = new MarkdownIt({
 })
 
 const renderedReadme = computed(() => markdown.render(readmeContent))
+
+const musicButtonIcon = computed(() => (isMusicPlaying.value ? 'music' : 'volume-xmark'))
 
 declare global {
   interface Window {
@@ -68,6 +75,43 @@ function toggleMonoMode() {
   isMonoMode.value = !isMonoMode.value
 }
 
+async function playBackgroundMusic() {
+  if (!backgroundMusic.value || !isMusicEnabled.value) {
+    return
+  }
+
+  try {
+    await backgroundMusic.value.play()
+    isMusicPlaying.value = true
+  } catch {
+    window.addEventListener('pointerdown', playBackgroundMusicOnInteraction, { once: true })
+  }
+}
+
+function playBackgroundMusicOnInteraction() {
+  void playBackgroundMusic()
+}
+
+function toggleBackgroundMusic() {
+  if (isMusicEnabled.value && !isMusicPlaying.value) {
+    void playBackgroundMusic()
+    return
+  }
+
+  isMusicEnabled.value = !isMusicEnabled.value
+
+  if (!backgroundMusic.value) {
+    return
+  }
+
+  if (isMusicEnabled.value) {
+    void playBackgroundMusic()
+  } else {
+    backgroundMusic.value.pause()
+    isMusicPlaying.value = false
+  }
+}
+
 function handleAction(icon: string) {
   if (icon === 'circle-half-stroke') {
     toggleMonoMode()
@@ -79,6 +123,10 @@ function handleAction(icon: string) {
 
   if (icon === 'circle-question') {
     isHelpPanelOpen.value = true
+  }
+
+  if (icon === 'music') {
+    toggleBackgroundMusic()
   }
 
 }
@@ -102,9 +150,19 @@ async function connectMetaMask() {
     walletError.value = error instanceof Error ? error.message : 'Wallet connection failed'
   }
 }
+
+onMounted(() => {
+  void playBackgroundMusic()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('pointerdown', playBackgroundMusicOnInteraction)
+})
 </script>
 
 <template>
+  <audio ref="backgroundMusic" :src="backgroundMusicUrl" loop preload="auto"></audio>
+
   <header class="game-header" :class="{ 'is-mono-mode': isMonoMode }">
     <div class="nav-shell">
       <nav class="main-nav" aria-label="Primary navigation">
@@ -113,7 +171,6 @@ async function connectMetaMask() {
           :key="item.label"
           class="nav-tab"
           :to="item.to"
-          @click.prevent
         >
           {{ item.label }}
         </RouterLink>
@@ -131,14 +188,31 @@ async function connectMetaMask() {
           :class="{
             active:
               (item.icon === 'circle-half-stroke' && isMonoMode) ||
-              (item.icon === 'wallet' && walletAddress),
+              (item.icon === 'wallet' && walletAddress) ||
+              (item.icon === 'music' && isMusicPlaying),
           }"
           type="button"
-          :aria-label="item.icon === 'wallet' && walletAddress ? shortWalletAddress : item.label"
-          :title="item.icon === 'wallet' && walletAddress ? shortWalletAddress : walletError || item.label"
+          :aria-label="
+            item.icon === 'wallet' && walletAddress
+              ? shortWalletAddress
+              : item.icon === 'music'
+                ? isMusicPlaying
+                  ? '關閉背景音樂'
+                  : '開啟背景音樂'
+                : item.label
+          "
+          :title="
+            item.icon === 'wallet' && walletAddress
+              ? shortWalletAddress
+              : item.icon === 'music'
+                ? isMusicPlaying
+                  ? '關閉背景音樂'
+                  : '開啟背景音樂'
+                : walletError || item.label
+          "
           @click="handleAction(item.icon)"
         >
-          <FontAwesomeIcon :icon="item.icon" aria-hidden="true" />
+          <FontAwesomeIcon :icon="item.icon === 'music' ? musicButtonIcon : item.icon" aria-hidden="true" />
         </button>
         <button
           class="action-button locale-button"
@@ -566,6 +640,14 @@ async function connectMetaMask() {
   border: 0;
 }
 
+@media (min-width: 901px) and (max-width: 1199px) {
+  .page-content {
+    height: calc(100dvh - 75px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
 @media (max-width: 900px) {
   .game-header {
     height: auto;
@@ -607,6 +689,18 @@ async function connectMetaMask() {
   .quick-actions {
     order: 3;
     margin-left: auto;
+  }
+
+  .page-content {
+    height: calc(100dvh - 132px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .page-arrow {
+    top: auto;
+    bottom: 18px;
+    transform: none;
   }
 }
 

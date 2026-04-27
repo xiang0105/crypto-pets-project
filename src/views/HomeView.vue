@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { pets } from '@/data/pets'
+import { expeditionTeamPets } from '@/state/expeditionTeam'
 import boboImage from '@/assets/capybaras/bobo.png'
 import capySanImage from '@/assets/capybaras/capy-san.png'
 import kokoImage from '@/assets/capybaras/koko.png'
@@ -127,7 +128,7 @@ onUnmounted(() => {
           </div>
           <div class="party-row">
             <div
-              v-for="(pet, index) in pets"
+              v-for="(pet, index) in expeditionTeamPets"
               :key="pet.id"
               class="scene-pet"
               :style="{ '--pet-index': index }"
