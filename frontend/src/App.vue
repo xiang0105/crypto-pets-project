@@ -3,7 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import { isZh, locale, toggleLocale } from './i18n'
-import readmeContent from '../README.md?raw'
+import { useWallet } from '@/composables/useWallet'
+import readmeContent from '@/content/help.md?raw'
 import backgroundMusicUrl from '@/assets/music/Capybara_Meadow.mp3'
 
 const menuItems = computed(() => [
@@ -24,8 +25,7 @@ const isHelpPanelOpen = ref(false)
 const isMusicEnabled = ref(false)
 const isMusicPlaying = ref(false)
 const backgroundMusic = ref<HTMLAudioElement | null>(null)
-const walletAddress = ref('')
-const walletError = ref('')
+const { walletAddress, walletError, shortWalletAddress, connectWallet, restoreSession } = useWallet()
 const route = useRoute()
 const router = useRouter()
 const slideDirection = ref<'left' | 'right'>('left')
@@ -41,23 +41,7 @@ const renderedReadme = computed(() => markdown.render(readmeContent))
 
 const musicButtonIcon = computed(() => (isMusicPlaying.value ? 'music' : 'volume-xmark'))
 
-declare global {
-  interface Window {
-    ethereum?: {
-      request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
-    }
-  }
-}
-
 const visibleActionItems = computed(() => actionItems)
-
-const shortWalletAddress = computed(() => {
-  if (!walletAddress.value) {
-    return ''
-  }
-
-  return `${walletAddress.value.slice(0, 6)}...${walletAddress.value.slice(-4)}`
-})
 
 const currentPageIndex = computed(() => {
   const index = pageOrder.indexOf(route.path)
@@ -118,7 +102,9 @@ function handleAction(icon: string) {
   }
 
   if (icon === 'wallet') {
-    connectMetaMask()
+    void connectWallet().catch(() => {
+      window.alert(walletError.value || 'Wallet login failed.')
+    })
   }
 
   if (icon === 'circle-question') {
@@ -152,6 +138,7 @@ async function connectMetaMask() {
 }
 
 onMounted(() => {
+  void restoreSession()
   void playBackgroundMusic()
 })
 

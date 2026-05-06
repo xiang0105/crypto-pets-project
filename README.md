@@ -1,152 +1,280 @@
-# CryptoPets: 鏈上寵物養成 DApp
+# CryptoPets Production Architecture
 
-一個結合 ERC-721（NFT）與 ERC-1155（SFT）的 Web3 遊戲專案，實現養成、戰鬥與去中心化資產交易。
+CryptoPets 已重構為前後端分離的 Web3 遊戲架構。核心原則是：
 
----
-
-## 專案概述 (Overview)
-
-CryptoPets 是一款混合式鏈上遊戲（Hybrid On-chain Game），設計核心為：
-
-「鏈下負責遊戲體驗，鏈上負責資產所有權」
-
-此架構可降低 Gas 消耗並提升遊戲流暢度，同時保留資產所有權與可交易性。
-
----
-
-## 核心玩法 (Core Gameplay)
-
-### 寵物養成系統
-
-- 五大屬性：火、水、草、光、暗
-- 每隻寵物具有：
-  - 個體值（IV）
-  - HP / ATK / DEF
-  - 三階段進化
-
----
-
-### 遠征系統
-
-- 自動累積資源
-- 支援離線收益
-- 批次領取（Claim）
-
----
-
-### 經濟與交易
-
-- NFT 可交易
-- SFT 可流通
-- 支援 P2P 交易
-
----
-
-## 技術架構 (Tech Stack)
-
-### 區塊鏈
-
-- Solidity
-- ERC-721 / ERC-1155
-
-### 前端
-
-- HTML / CSS / JavaScript
-- Phaser3
-
-### Web3
-
-- Ethers.js / Web3.js
-- MetaMask
-
----
-
-## 資料結構 (Data Schema)
-
-### 寵物 NFT
-
-```javascript
-{
-    "id": "",
-    "name": "",
-    "element": 1, // 元素屬性：[火、水、草、光、暗]
-    "stage": 0, // 寵物階段：[0、1、2]
-    "tokenURI": "",
-    "stats": {
-        "iv": 95,
-        "hp": 120,
-        "atk": 45,
-        "def": 30
-    },
-    "exp": 1500, // 寵物升級所需經驗值
-    "owner": "",
-    "birthTime": ""
-}
+```text
+鏈上只處理 NFT 資產所有權
+鏈下處理遊戲邏輯、玩家狀態、遠征獎勵、好友與社交資料
 ```
 
----
+## 專案目錄
 
-### 素材 SFT
-
-```javascript
-{
-    "id": "MAT-1C",
-    "name": "",
-    "element": 1, // 素材屬性：[火、水、草、光、暗]
-    "grade": "C", // 素材等級：[A、B、C]
-    "amount": 0,
-    "description": ""
-}
+```text
+/
+├─ frontend/   Vite + Vue 3 + TypeScript 前端，部署到 Vercel
+├─ backend/    Node.js + Express + TypeScript API，部署到 Render
+├─ shared/     前後端共用 TypeScript 型別
+├─ README.md   最外層架構、部署、安全與資料夾說明
+├─ .env.example
+├─ package.json
+├─ package-lock.json
+└─ render.yaml
 ```
 
----
+## 各資料夾職責
 
-### 回憶錄
+### `frontend/`
 
-```javascript
-{
-    "tokenId": "",
-    "totalBattles": 0, // 總戰場場
-    "winRate": 0.65, // 勝率
-    "adventures": 0, // 累積遠征獎勵
-    "Owners": "", // 目前的玩家
-    "status": "Active" // 狀態
-}
+玩家實際操作的遊戲介面。
+
+負責：
+
+- Vue 3 畫面、路由、互動與遊戲 UI
+- MetaMask 錢包連線與簽名登入流程
+- 呼叫 backend REST API
+- 顯示玩家、寵物、遠征、商店、好友等資料
+- 僅使用 `VITE_` 開頭的公開環境變數
+
+不負責：
+
+- 不計算正式遠征獎勵
+- 不直接修改玩家進度
+- 不持有 Supabase service role key
+- 不信任瀏覽器傳入的時間、獎勵、EXP 或 stats
+
+重要檔案：
+
+- `frontend/src/api/`：前端 API client
+- `frontend/src/composables/useWallet.ts`：MetaMask 簽名登入狀態
+- `frontend/vercel.json`：Vercel 部署與安全 headers
+- `frontend/.env.example`：前端公開環境變數範本
+- `frontend/README.md`：遊戲玩法與原本專案說明
+
+### `backend/`
+
+CryptoPets 的可信任遊戲伺服器。
+
+負責：
+
+- Wallet signature verification login
+- JWT API session
+- 玩家資料查詢
+- 遠征開始與獎勵領取
+- 使用 server time 計算遠征是否完成
+- 防止重複 claim
+- 驗證所有 API input
+- 寫入 Supabase PostgreSQL
+- 未來可加入 NFT ownership verification
+
+重要檔案：
+
+- `backend/src/app.ts`：Express app、CORS、Helmet、安全 middleware
+- `backend/src/routes/`：REST API 路由
+- `backend/src/controllers/`：HTTP controller
+- `backend/src/services/`：商業邏輯與 Supabase 操作
+- `backend/src/middleware/auth.ts`：JWT 驗證
+- `backend/supabase/schema.sql`：資料表、index、RLS policy
+- `backend/.env.example`：後端機密環境變數範本
+
+### `shared/`
+
+前後端共用型別，避免 API response 與前端資料模型分歧。
+
+負責：
+
+- `PlayerProfile`
+- `PlayerPet`
+- `ExpeditionSummary`
+- `ExpeditionReward`
+- `FriendSummary`
+- Auth API response types
+
+重要檔案：
+
+- `shared/src/index.ts`
+
+## 架構大綱
+
+```text
+MetaMask
+   │
+   │ wallet signature
+   ▼
+frontend (Vercel)
+   │
+   │ REST API + JWT
+   ▼
+backend (Render)
+   │
+   │ service role, server-side validation
+   ▼
+Supabase PostgreSQL
 ```
 
----
+區塊鏈互動只應用於：
 
-## 進化系統
+- 驗證 NFT 擁有權
+- 讀取鏈上 token / contract / owner 資訊
+- 必要時執行資產交易或 mint/burn 流程
 
-```javascript
-const EVOLUTION_CONFIG = {
-    "ELEMENT_1": {
-        "TO_STAGE_1": {
-            "requiredMat": [
-                { "id": "MAT-1C", "count": 5 }
-            ],
-            "statsBoost": 10
-        }
-    }
-};
+遊戲邏輯保留在 backend：
+
+- expedition start / claim
+- reward calculation
+- EXP / stats / progression
+- friends / friend requests
+- marketplace 狀態
+- anti-cheat validation
+
+## API 大綱
+
+Auth:
+
+- `POST /auth/nonce`
+- `POST /auth/login`
+
+Player:
+
+- `GET /player`
+
+Expedition:
+
+- `POST /start-expedition`
+- `POST /claim-reward`
+
+Social:
+
+- `POST /add-friend`
+- `GET /friends`
+
+## Supabase 資料表
+
+Schema 在 `backend/supabase/schema.sql`。
+
+目前設計：
+
+- `users`：wallet identity、username
+- `auth_nonces`：wallet login challenge，避免重放簽名
+- `pets`：off-chain pet metadata / stats / exp
+- `expeditions`：遠征狀態、server time、claim reward
+- `friends`：好友關係
+- `friend_requests`：好友邀請
+
+所有 table 都啟用 RLS。正式 game mutation 由 backend 使用 service role key 執行，service role key 不得暴露到 frontend。
+
+## 環境變數
+
+根目錄 `.env.example` 是總覽範本。
+
+Frontend 只允許公開變數：
+
+```text
+VITE_API_BASE_URL
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+VITE_CHAIN_ID
+VITE_NFT_CONTRACT_ADDRESS
 ```
 
----
+Backend 可使用機密：
 
-## 遠征系統特點
+```text
+SUPABASE_SERVICE_ROLE_KEY
+JWT_SECRET
+RPC_URL
+NFT_CONTRACT_ADDRESS
+CORS_ORIGIN
+WEB3_LOGIN_DOMAIN
+```
 
-1. 玩家派出寵物  
-2. 記錄時間  
-3. 累積獎勵  
-4. Claim 上鏈  
+不要把 backend secrets 放進任何 `VITE_` 變數。
 
----
+## 本機開發
 
-## 未來規劃
+安裝 dependencies：
 
-- PvP 系統 <!-- 可能沒有 -->
-- 公會系統
-- DAO 治理
-- Layer2 部署
+```bash
+npm install
+```
 
----
+建立 env：
+
+```bash
+cp frontend/.env.example frontend/.env
+cp backend/.env.example backend/.env
+```
+
+建立 Supabase schema：
+
+```text
+在 Supabase SQL editor 執行 backend/supabase/schema.sql
+```
+
+啟動：
+
+```bash
+npm run dev:backend
+npm run dev:frontend
+```
+
+Build：
+
+```bash
+npm run build
+```
+
+## 部署
+
+### Vercel Frontend
+
+Project root：
+
+```text
+frontend
+```
+
+設定：
+
+- Build command: `npm run build`
+- Output directory: `dist`
+- Environment variables: 只設定 `VITE_` 開頭的公開變數
+
+`frontend/vercel.json` 已加入：
+
+- `X-Content-Type-Options`
+- `X-Frame-Options`
+- `Referrer-Policy`
+- `Permissions-Policy`
+- `Content-Security-Policy`
+
+### Render Backend
+
+Root directory：
+
+```text
+backend
+```
+
+設定：
+
+- Build command: `npm install && npm run build`
+- Start command: `node dist/index.js`
+
+必要環境變數：
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `JWT_SECRET`
+- `CORS_ORIGIN`
+- `WEB3_LOGIN_DOMAIN`
+
+## 已修正的主要架構問題
+
+- 原本 demo local arrays / Vue refs 是權威遊戲狀態，已改為 backend + database ownership
+- 原本 wallet connect 只取得 address，已改為 nonce + MetaMask signature verification
+- 遠征獎勵不再由 frontend 計算
+- Claim 使用 backend server time
+- Claim update 檢查 `status = 'started'`，避免重複領取
+- Backend 使用 `zod` 驗證 input
+- Backend secrets 不進 frontend bundle
+- Supabase tables 全部啟用 RLS
