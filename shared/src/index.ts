@@ -62,6 +62,43 @@ export interface FriendSummary {
   since: string
 }
 
+export interface InventoryItem {
+  materialId: string
+  amount: number
+  updatedAt: string
+}
+
+export interface PlayerResources {
+  coins: number
+  inventory: InventoryItem[]
+}
+
+export type MarketListingStatus = 'active' | 'sold' | 'cancelled'
+
+export interface MarketListing {
+  id: string
+  sellerId: string
+  sellerWallet: WalletAddress | null
+  materialId: string
+  amount: number
+  price: number
+  status: MarketListingStatus
+  buyerId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type TransactionAction = 'reward' | 'list' | 'buy' | 'sell' | 'cancel' | 'upgrade' | 'advance'
+
+export interface PlayerTransaction {
+  id: string
+  action: TransactionAction
+  materialId: string | null
+  materialAmount: number | null
+  coinAmount: number
+  createdAt: string
+}
+
 export interface AuthNonceResponse {
   nonce: string
   message: string

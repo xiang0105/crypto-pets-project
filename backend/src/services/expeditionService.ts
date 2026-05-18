@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import type { ExpeditionReward, ExpeditionSummary } from '@cryptopets/shared'
+import { materialIds } from '@cryptopets/game-content'
 import { supabase } from '../config/supabase.js'
 import { HttpError } from '../utils/httpError.js'
 
@@ -126,6 +127,7 @@ export async function claimReward(userId: string, input: unknown): Promise<Exped
   }
 
   await applyPetExp(userId, expedition.pet_ids, reward.exp)
+  await applyPlayerReward(userId, updated.id, reward)
 
   return {
     id: updated.id,
@@ -152,7 +154,76 @@ function calculateReward(
   return {
     exp: 80 + petIds.length * 20 + variance,
     coins: 40 + petIds.length * 15 + (seed[1] % 21),
-    materials: [{ id: seed[2] % 2 === 0 ? 'MAT-2C' : 'MAT-4B', count: 1 + (seed[3] % 2) }],
+    materials: [{ id: materialIds[seed[2] % materialIds.length] ?? 'MAT-2C', count: 1 + (seed[3] % 2) }],
+  }
+}
+
+async function applyPlayerReward(userId: string, expeditionId: string, reward: ExpeditionReward) {
+  await addCoins(userId, reward.coins)
+  await Promise.all(reward.materials.map((material) => addMaterial(userId, material.id, material.count)))
+
+  const { error } = await supabase.from('transactions').insert({
+    user_id: userId,
+    action: 'reward',
+    listing_id: null,
+    coin_amount: reward.coins,
+    metadata: {
+      expeditionId,
+      exp: reward.exp,
+      materials: reward.materials,
+    },
+  })
+
+  if (error) {
+    throw new HttpError(500, 'REWARD_TRANSACTION_CREATE_FAILED')
+  }
+}
+
+async function addCoins(userId: string, coins: number) {
+  const { data: currency, error: lookupError } = await supabase
+    .from('currencies')
+    .select('coins')
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (lookupError) {
+    throw new HttpError(500, 'CURRENCY_LOOKUP_FAILED')
+  }
+
+  const nextCoins = (currency?.coins ?? 0) + coins
+  const { error } = await supabase.from('currencies').upsert({
+    user_id: userId,
+    coins: nextCoins,
+    updated_at: new Date().toISOString(),
+  })
+
+  if (error) {
+    throw new HttpError(500, 'CURRENCY_UPDATE_FAILED')
+  }
+}
+
+async function addMaterial(userId: string, materialId: string, count: number) {
+  const { data: inventoryItem, error: lookupError } = await supabase
+    .from('inventory')
+    .select('amount')
+    .eq('user_id', userId)
+    .eq('material_id', materialId)
+    .maybeSingle()
+
+  if (lookupError) {
+    throw new HttpError(500, 'INVENTORY_LOOKUP_FAILED')
+  }
+
+  const nextAmount = (inventoryItem?.amount ?? 0) + count
+  const { error } = await supabase.from('inventory').upsert({
+    user_id: userId,
+    material_id: materialId,
+    amount: nextAmount,
+    updated_at: new Date().toISOString(),
+  })
+
+  if (error) {
+    throw new HttpError(500, 'INVENTORY_UPDATE_FAILED')
   }
 }
 

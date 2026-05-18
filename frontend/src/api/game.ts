@@ -1,8 +1,19 @@
-import type { ExpeditionSummary, FriendSummary, PlayerProfile } from '@cryptopets/shared'
+import type {
+  ExpeditionSummary,
+  FriendSummary,
+  MarketListing,
+  PlayerResources,
+  PlayerProfile,
+  PlayerTransaction,
+} from '@cryptopets/shared'
 import { apiRequest } from './client'
 
 export function getPlayer() {
   return apiRequest<PlayerProfile>('/player')
+}
+
+export function getResources() {
+  return apiRequest<PlayerResources>('/resources')
 }
 
 export function startExpedition(petIds: string[], expeditionType = 'forest') {
@@ -28,4 +39,33 @@ export function addFriend(wallet: string) {
 
 export function getFriends() {
   return apiRequest<FriendSummary[]>('/friends')
+}
+
+export function getMarketListings() {
+  return apiRequest<MarketListing[]>('/market/listings')
+}
+
+export function listMarketMaterial(materialId: string, amount: number, price: number) {
+  return apiRequest<MarketListing>('/market/listings', {
+    method: 'POST',
+    body: JSON.stringify({ materialId, amount, price }),
+  })
+}
+
+export function cancelMarketListing(listingId: string) {
+  return apiRequest<MarketListing>('/market/cancel-listing', {
+    method: 'POST',
+    body: JSON.stringify({ listingId }),
+  })
+}
+
+export function buyMarketListing(listingId: string) {
+  return apiRequest<MarketListing>('/market/buy-listing', {
+    method: 'POST',
+    body: JSON.stringify({ listingId }),
+  })
+}
+
+export function getTransactions() {
+  return apiRequest<PlayerTransaction[]>('/transactions')
 }

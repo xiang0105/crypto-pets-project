@@ -3,10 +3,7 @@ import { computed, ref } from 'vue'
 import { goodies } from '@/data/goodies'
 import type { GoodieSft } from '@/data/goodies'
 import { isZh } from '@/i18n'
-import boboImage from '@/assets/capybaras/bobo.png'
-import capySanImage from '@/assets/capybaras/capy-san.png'
-import kokoImage from '@/assets/capybaras/koko.png'
-import yuzuBoyImage from '@/assets/capybaras/yuzu-boy.png'
+import { marketCapybaraSprites } from '@/content/gameAssets'
 import marketMap from '@/assets/map/market.png'
 
 const text = computed(() => ({
@@ -15,6 +12,11 @@ const text = computed(() => ({
   animation: isZh.value ? '動畫' : 'Animation',
   listItem: isZh.value ? '上架商品' : 'LIST ITEM FOR SALE',
   sellGoodies: isZh.value ? '出售你的道具' : 'SELL YOUR GOODIES',
+  inventoryTitle: isZh.value ? '選擇要上架的材料' : 'Choose material to list',
+  inventoryHint: isZh.value ? '背包材料' : 'Inventory',
+  price: isZh.value ? '價格' : 'Price',
+  listSelected: isZh.value ? '確認上架' : 'List item',
+  emptyListings: isZh.value ? '尚未上架任何商品' : 'No active listings yet',
   overview: isZh.value ? '我的市場總覽' : 'MY MARKETPLACE OVERVIEW',
   activeListings: isZh.value ? '上架中商品' : 'MY ACTIVE LISTINGS',
   transactions: isZh.value ? '近期交易' : 'RECENT TRANSACTIONS',
@@ -22,6 +24,7 @@ const text = computed(() => ({
   buy: isZh.value ? '購買' : 'Buy',
   bought: isZh.value ? '買入' : 'Bought',
   sold: isZh.value ? '售出' : 'Sold',
+  listed: isZh.value ? '上架' : 'Listed',
   coins: isZh.value ? '金幣' : 'Coins',
 }))
 
@@ -30,18 +33,17 @@ const shelfDirection = ref<'prev' | 'next'>('next')
 const shelfSwitching = ref(false)
 const removedListingIds = ref<string[]>([])
 const pendingRemoval = ref<GoodieSft | null>(null)
+const isInventoryModalOpen = ref(false)
+const selectedInventoryId = ref('')
+const listingPrice = ref(100)
+const createdListings = ref<GoodieSft[]>([])
+const purchasedListingIds = ref<string[]>([])
+const storeNotice = ref('')
+const transactionHistory = ref<Array<{ actionKey: 'bought' | 'sold' | 'listed'; name: string; amount: number }>>([])
 let shelfSwitchTimer: number | undefined
 const shelfPageSize = 16
 const defaultStoreItemCount = 36
-const marketCapybaras = [
-  { id: 'capy-san-a', src: capySanImage, name: 'Capy-San', motion: 'walk-right' },
-  { id: 'koko-a', src: kokoImage, name: 'Koko', motion: 'walk-left' },
-  { id: 'bobo-a', src: boboImage, name: 'Bobo', motion: 'linger' },
-  { id: 'yuzu-boy-a', src: yuzuBoyImage, name: 'Yuzu Boy', motion: 'walk-right' },
-  { id: 'koko-b', src: kokoImage, name: 'Koko', motion: 'linger' },
-  { id: 'capy-san-b', src: capySanImage, name: 'Capy-San', motion: 'walk-left' },
-  { id: 'bobo-b', src: boboImage, name: 'Bobo', motion: 'walk-right' },
-]
+const marketCapybaras = marketCapybaraSprites
 const storeGoodies = computed<GoodieSft[]>(() =>
   Array.from({ length: defaultStoreItemCount }, (_, index) => {
     const goodie = goodies[index % goodies.length] ?? goodies[0]
@@ -67,18 +69,39 @@ const shelfSlots = computed<(GoodieSft | null)[]>(() => {
   return [...visibleGoodies, ...Array.from({ length: emptySlotCount }, (): null => null)]
 })
 const overviewListingSlots = computed(() => {
-  const listings = goodies
-    .filter((goodie) => goodie.status === 'active' && !removedListingIds.value.includes(goodie.id))
+  const listings = createdListings.value
+    .filter((goodie) => !removedListingIds.value.includes(goodie.id))
     .slice(0, 40)
 
   return [...listings, ...Array.from({ length: Math.max(0, 40 - listings.length) }, () => null)]
 })
 
-const transactions = computed(() => [
-  { action: text.value.bought, name: isZh.value ? '柿醬' : 'Jam', amount: -150 },
-  { action: text.value.sold, name: isZh.value ? '柚果' : 'Yuzu', amount: 100 },
-  { action: text.value.bought, name: isZh.value ? '圍巾' : 'Scarf', amount: 100 },
-])
+const inventoryGoodies = computed(() => goodies.filter((goodie) => goodie.amount > 0))
+const inventorySlots = computed<(GoodieSft | null)[]>(() => {
+  const minimumSlots = 4
+
+  return [
+    ...inventoryGoodies.value,
+    ...Array.from({ length: Math.max(0, minimumSlots - inventoryGoodies.value.length) }, () => null),
+  ]
+})
+const selectedInventoryGoodie = computed(() =>
+  inventoryGoodies.value.find((goodie) => goodie.id === selectedInventoryId.value) ?? inventoryGoodies.value[0],
+)
+const transactions = computed(() => {
+  const actionLabels = {
+    bought: text.value.bought,
+    sold: text.value.sold,
+    listed: text.value.listed,
+  }
+  const liveTransactions = transactionHistory.value.map((item) => ({
+    action: actionLabels[item.actionKey],
+    name: item.name,
+    amount: item.amount,
+  }))
+
+  return liveTransactions.slice(0, 8)
+})
 
 function displayName(goodie: GoodieSft) {
   return isZh.value ? goodie.name.zh : goodie.name.en
@@ -100,6 +123,17 @@ function removeListingLabel() {
   return isZh.value ? '下架' : 'Remove'
 }
 
+function buyLabel(goodie: GoodieSft) {
+  return purchasedListingIds.value.includes(goodie.id) ? text.value.bought : text.value.buy
+}
+
+function recordTransaction(actionKey: 'bought' | 'sold' | 'listed', name: string, amount: number) {
+  transactionHistory.value = [
+    { actionKey, name, amount },
+    ...transactionHistory.value,
+  ].slice(0, 8)
+}
+
 function modalText() {
   return {
     title: isZh.value ? '確認下架商品' : 'Remove listing?',
@@ -113,6 +147,59 @@ function requestRemoveListing(goodie: GoodieSft) {
   pendingRemoval.value = goodie
 }
 
+function openInventoryModal() {
+  const firstGoodie = inventoryGoodies.value[0]
+
+  selectedInventoryId.value = selectedInventoryId.value || firstGoodie?.id || ''
+  listingPrice.value = selectedInventoryGoodie.value?.price ?? 100
+  isInventoryModalOpen.value = true
+}
+
+function closeInventoryModal() {
+  isInventoryModalOpen.value = false
+}
+
+function selectInventoryGoodie(goodie: GoodieSft | null) {
+  if (!goodie) {
+    return
+  }
+
+  selectedInventoryId.value = goodie.id
+  listingPrice.value = goodie.price
+}
+
+function buyGoodie(goodie: GoodieSft) {
+  if (purchasedListingIds.value.includes(goodie.id)) {
+    return
+  }
+
+  purchasedListingIds.value = [...purchasedListingIds.value, goodie.id]
+  const name = displayName(goodie)
+  recordTransaction('bought', name, -goodie.price)
+  storeNotice.value = isZh.value ? `已購買 ${name}` : `Bought ${name}`
+}
+
+function listSelectedGoodie() {
+  const selectedGoodie = selectedInventoryGoodie.value
+
+  if (!selectedGoodie) {
+    storeNotice.value = isZh.value ? '沒有可上架的材料。' : 'No material available to list.'
+    return
+  }
+
+  const listingIndex = createdListings.value.length + 1
+  const listing: GoodieSft = {
+    ...selectedGoodie,
+    id: `${selectedGoodie.id}-listing-${listingIndex}`,
+    status: 'active',
+    price: Math.max(1, Math.round(listingPrice.value)),
+  }
+  createdListings.value = [listing, ...createdListings.value]
+  recordTransaction('listed', displayName(listing), 0)
+  storeNotice.value = isZh.value ? `已上架 ${displayName(listing)}` : `Listed ${displayName(listing)}`
+  closeInventoryModal()
+}
+
 function cancelRemoveListing() {
   pendingRemoval.value = null
 }
@@ -123,6 +210,7 @@ function confirmRemoveListing() {
   }
 
   removedListingIds.value = [...removedListingIds.value, pendingRemoval.value.id]
+  storeNotice.value = isZh.value ? `已下架 ${displayName(pendingRemoval.value)}` : `Removed ${displayName(pendingRemoval.value)}`
   pendingRemoval.value = null
 }
 
@@ -188,9 +276,9 @@ function goShelfArea(direction: -1 | 1) {
               <i aria-hidden="true"></i>
               <span>{{ goodie.price }}</span>
             </div>
-            <button type="button">
+            <button type="button" :disabled="purchasedListingIds.includes(goodie.id)" @click="buyGoodie(goodie)">
               <i aria-hidden="true"></i>
-              <span>{{ text.buy }}</span>
+              <span>{{ buyLabel(goodie) }}</span>
             </button>
           </footer>
         </template>
@@ -232,7 +320,7 @@ function goShelfArea(direction: -1 | 1) {
           </div>
         </div>
 
-        <button class="sell-banner" type="button">
+        <button class="sell-banner" type="button" @click="openInventoryModal">
           <span class="basket" aria-hidden="true"></span>
           <span>
             <strong>{{ text.listItem }}</strong>
@@ -279,6 +367,7 @@ function goShelfArea(direction: -1 | 1) {
           <section class="activity-panel">
             <div class="transaction-list">
               <h3>{{ text.transactions }}</h3>
+              <p v-if="storeNotice" class="store-notice">{{ storeNotice }}</p>
               <p v-for="item in transactions" :key="`${item.action}-${item.name}`">
                 <strong>{{ item.action }}: {{ item.name }}</strong>
                 <span :class="{ gain: item.amount > 0 }">
@@ -289,6 +378,7 @@ function goShelfArea(direction: -1 | 1) {
 
             <div class="reputation-box">
               <h3>{{ text.reputation }}</h3>
+              <strong class="reputation-score">0</strong>
               <div class="reputation-row">
                 <span class="pet-mark" aria-hidden="true"></span>
                 <div class="reputation-meter" aria-label="Marketplace reputation">
@@ -302,6 +392,63 @@ function goShelfArea(direction: -1 | 1) {
       </section>
     </section>
   </section>
+
+    <div
+      v-if="isInventoryModalOpen"
+      class="remove-modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="inventory-listing-title"
+      @click.self="closeInventoryModal"
+    >
+      <section class="inventory-modal">
+        <header>
+          <h2 id="inventory-listing-title">{{ text.inventoryTitle }}</h2>
+          <button type="button" aria-label="Close" @click="closeInventoryModal">×</button>
+        </header>
+
+        <div class="inventory-layout">
+          <div class="inventory-grid" :aria-label="text.inventoryHint">
+            <button
+              v-for="(goodie, index) in inventorySlots"
+              :key="goodie?.id ?? `empty-inventory-${index}`"
+              class="inventory-slot"
+              :class="{ selected: goodie?.id === selectedInventoryId, empty: !goodie }"
+              type="button"
+              :disabled="!goodie"
+              @click="selectInventoryGoodie(goodie)"
+            >
+              <template v-if="goodie">
+                <span class="grade-corner" :class="`grade-${goodie.grade.toLowerCase()}`">
+                  {{ gradeLabel(goodie.grade) }}
+                </span>
+                <span class="material-name">{{ displayName(goodie) }}</span>
+                <span class="material-frame">
+                  <span class="material-icon" :class="`material-${goodie.element}`"></span>
+                </span>
+                <span class="inventory-price"><i aria-hidden="true"></i>{{ goodie.price }}</span>
+                <span class="inventory-action"><i aria-hidden="true"></i>{{ isZh ? '選擇' : 'Select' }}</span>
+                <small>x{{ goodie.amount }}</small>
+              </template>
+              <template v-else>
+                <span class="empty-inventory-slot" aria-hidden="true"></span>
+              </template>
+            </button>
+          </div>
+
+          <aside v-if="selectedInventoryGoodie" class="inventory-detail">
+            <span class="material-icon large" :class="`material-${selectedInventoryGoodie.element}`"></span>
+            <strong>{{ displayName(selectedInventoryGoodie) }}</strong>
+            <small>{{ selectedInventoryGoodie.description }}</small>
+            <label>
+              {{ text.price }}
+              <input v-model.number="listingPrice" type="number" min="1" step="1" />
+            </label>
+            <button type="button" @click="listSelectedGoodie">{{ text.listSelected }}</button>
+          </aside>
+        </div>
+      </section>
+    </div>
 
     <div
       v-if="pendingRemoval"
@@ -647,6 +794,13 @@ function goShelfArea(direction: -1 | 1) {
   justify-self: stretch;
 }
 
+.goodie-card button:disabled {
+  color: #6f6255;
+  cursor: not-allowed;
+  background: linear-gradient(#ded0b2, #bca889);
+  border-color: #8c7254;
+}
+
 .market-workspace {
   z-index: 1;
   display: grid;
@@ -975,6 +1129,18 @@ function goShelfArea(direction: -1 | 1) {
   scrollbar-width: thin;
 }
 
+.empty-listings-note {
+  display: grid;
+  place-items: center;
+  min-height: 36px;
+  margin: 0 0 6px;
+  color: #744122;
+  font-size: 13px;
+  font-weight: 1000;
+  background: rgba(255, 247, 223, 0.48);
+  border-radius: 6px;
+}
+
 .listing-grid::-webkit-scrollbar {
   width: 8px;
 }
@@ -1148,6 +1314,15 @@ function goShelfArea(direction: -1 | 1) {
   justify-content: center;
 }
 
+.reputation-score {
+  margin-bottom: 8px;
+  color: #5e3a23;
+  font-size: 28px;
+  font-weight: 1000;
+  line-height: 1;
+  text-align: center;
+}
+
 .transaction-list p {
   display: flex;
   justify-content: space-between;
@@ -1157,6 +1332,15 @@ function goShelfArea(direction: -1 | 1) {
   font-size: 13px;
   font-weight: 1000;
   line-height: 1.2;
+}
+
+.transaction-list .store-notice {
+  display: block;
+  padding: 5px 7px;
+  color: #26582b;
+  text-align: center;
+  background: rgba(200, 232, 158, 0.55);
+  border-radius: 6px;
 }
 
 .transaction-list span {
@@ -1211,7 +1395,7 @@ function goShelfArea(direction: -1 | 1) {
 
 .reputation-meter i {
   display: block;
-  width: 35%;
+  width: 0;
   height: 100%;
   background: linear-gradient(90deg, #ffcb64, #f08b38);
 }
@@ -1291,6 +1475,289 @@ function goShelfArea(direction: -1 | 1) {
   color: #fff7df;
   background: linear-gradient(#d46d52, #b54a38);
   border-color: #7a3f2a;
+}
+
+.inventory-modal {
+  width: min(760px, 94vw);
+  max-height: min(720px, 90vh);
+  overflow: hidden;
+  color: #5d3223;
+  font-family: 'Trebuchet MS', Verdana, 'Microsoft JhengHei', sans-serif;
+  background:
+    linear-gradient(90deg, rgba(255, 218, 152, 0.12) 0 3px, transparent 3px 28px),
+    linear-gradient(#a76438, #7f4727);
+  border: 5px solid #5b311a;
+  border-radius: 8px;
+  box-shadow:
+    inset 0 0 0 3px #bd8654,
+    inset 0 0 18px rgba(61, 31, 16, 0.5),
+    0 12px 0 rgba(43, 27, 18, 0.26);
+}
+
+.inventory-modal header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px 10px;
+}
+
+.inventory-modal h2 {
+  margin: 0;
+  color: #fff7df;
+  font-size: 24px;
+  font-weight: 1000;
+  text-shadow: 0 2px 0 rgba(61, 31, 16, 0.45);
+}
+
+.inventory-modal header button {
+  width: 34px;
+  height: 34px;
+  color: #fff7df;
+  font-size: 24px;
+  font-weight: 1000;
+  cursor: pointer;
+  background: #b54a38;
+  border: 3px solid #6e3d23;
+  border-radius: 8px;
+}
+
+.inventory-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 230px;
+  gap: 14px;
+  padding: 0 18px 18px;
+}
+
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 104px);
+  grid-auto-rows: 168px;
+  gap: 10px;
+  justify-content: start;
+  max-height: 560px;
+  min-height: 216px;
+  overflow: auto;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  padding: 20px 28px;
+  background:
+    linear-gradient(90deg, transparent 0 calc(25% - 3px), rgba(83, 45, 24, 0.72) calc(25% - 3px) calc(25% + 3px), transparent calc(25% + 3px)),
+    linear-gradient(90deg, transparent 0 calc(50% - 3px), rgba(83, 45, 24, 0.72) calc(50% - 3px) calc(50% + 3px), transparent calc(50% + 3px)),
+    linear-gradient(90deg, transparent 0 calc(75% - 3px), rgba(83, 45, 24, 0.72) calc(75% - 3px) calc(75% + 3px), transparent calc(75% + 3px)),
+    linear-gradient(180deg, transparent 0 calc(25% - 3px), rgba(83, 45, 24, 0.76) calc(25% - 3px) calc(25% + 3px), transparent calc(25% + 3px)),
+    linear-gradient(180deg, transparent 0 calc(50% - 3px), rgba(83, 45, 24, 0.76) calc(50% - 3px) calc(50% + 3px), transparent calc(50% + 3px)),
+    linear-gradient(180deg, transparent 0 calc(75% - 3px), rgba(83, 45, 24, 0.76) calc(75% - 3px) calc(75% + 3px), transparent calc(75% + 3px)),
+    linear-gradient(#a1663a, #7f4727);
+  border: 4px solid #5b311a;
+  border-radius: 6px;
+}
+
+.inventory-grid::-webkit-scrollbar {
+  display: none;
+}
+
+.inventory-slot {
+  position: relative;
+  display: grid;
+  grid-template-rows: 24px 1fr auto auto;
+  gap: 5px;
+  box-sizing: border-box;
+  width: 104px;
+  min-height: 168px;
+  height: 168px;
+  padding: 7px 9px 8px;
+  color: #4d2d1d;
+  cursor: pointer;
+  background: linear-gradient(#fff1c8, #ffd889);
+  border: 4px solid #6e3d23;
+  border-radius: 9px;
+  box-shadow:
+    inset 0 0 0 2px #fff8de,
+    0 3px 0 rgba(55, 33, 23, 0.22);
+}
+
+.inventory-slot.selected {
+  outline: 4px solid #f8d35f;
+  transform: translateY(-1px);
+}
+
+.inventory-slot.empty {
+  display: grid;
+  grid-template-rows: 1fr;
+  place-items: center;
+  cursor: default;
+  opacity: 0.72;
+  background: rgba(255, 216, 137, 0.38);
+  border-style: dashed;
+}
+
+.empty-inventory-slot {
+  width: 54px;
+  aspect-ratio: 1;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12), transparent 42%),
+    #6f4b31;
+  border: 2px dashed #e3b16a;
+  border-radius: 7px;
+}
+
+.material-name,
+.inventory-slot small {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 1000;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.material-name {
+  padding-right: 18px;
+  font-size: 17px;
+  line-height: 1;
+  text-align: left;
+}
+
+.inventory-slot small {
+  position: absolute;
+  right: 10px;
+  top: 92px;
+  color: #fff;
+  font-size: 12px;
+  text-shadow: 1px 1px 0 #2d2d2d;
+}
+
+.material-frame {
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  width: 70px;
+  aspect-ratio: 1;
+  background: #777;
+  border: 3px solid #fff0c4;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 2px rgba(75, 75, 75, 0.22);
+}
+
+.material-icon {
+  display: block;
+  justify-self: center;
+  width: 38px;
+  height: 38px;
+  background: #e7a23f;
+  border: 2px solid rgba(255, 247, 223, 0.75);
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.28);
+}
+
+.inventory-price,
+.inventory-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-weight: 1000;
+}
+
+.inventory-price {
+  color: #4f3324;
+  font-size: 14px;
+}
+
+.inventory-price i,
+.inventory-action i {
+  width: 13px;
+  height: 13px;
+  background: radial-gradient(circle at 35% 30%, #ffe58c 0 21%, #e9a73c 22% 58%, #a76820 59% 100%);
+  border: 1px solid #985e1f;
+  border-radius: 999px;
+}
+
+.inventory-action {
+  min-height: 26px;
+  color: #6a321c;
+  font-size: 13px;
+  background: linear-gradient(#ffe794, #f7b746);
+  border: 3px solid #b8702b;
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.material-icon.large {
+  width: 78px;
+  height: 78px;
+}
+
+.material-1 {
+  background: linear-gradient(135deg, #f7c75b, #e78433);
+  border-radius: 50% 46% 52% 48%;
+}
+
+.material-2 {
+  background: linear-gradient(135deg, #9dd36a, #3f9850);
+  border-radius: 12px 26px 12px 26px;
+}
+
+.material-3 {
+  background: linear-gradient(135deg, #b7e4ef, #559fb8);
+}
+
+.material-4 {
+  background: linear-gradient(135deg, #efb3d8, #b86aa2);
+  border-radius: 50%;
+}
+
+.inventory-detail {
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  gap: 10px;
+  padding: 14px;
+  background: #fff1c8;
+  border: 4px solid #6e3d23;
+  border-radius: 8px;
+}
+
+.inventory-detail strong {
+  font-size: 22px;
+  font-weight: 1000;
+}
+
+.inventory-detail small {
+  min-height: 52px;
+  color: #4f4f4f;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.inventory-detail label {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  font-size: 14px;
+  font-weight: 1000;
+}
+
+.inventory-detail input {
+  width: 100%;
+  min-height: 34px;
+  padding: 4px 8px;
+  color: #2d2d2d;
+  font: inherit;
+  background: #fff;
+  border: 3px solid #5b5b5b;
+}
+
+.inventory-detail button {
+  width: 100%;
+  min-height: 40px;
+  color: #2d2d2d;
+  font-size: 15px;
+  font-weight: 1000;
+  cursor: pointer;
+  background: #e4c067;
+  border: 3px solid #5b5b5b;
 }
 
 @keyframes product-name-marquee {
@@ -1412,9 +1879,9 @@ function goShelfArea(direction: -1 | 1) {
 
 @media (min-width: 768px) and (max-width: 1199px) {
   .store-view-root {
-    height: auto;
-    min-height: 100%;
-    overflow: visible;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .market-page {
@@ -1423,9 +1890,9 @@ function goShelfArea(direction: -1 | 1) {
     grid-template-columns: 1fr;
     gap: 22px;
     width: min(760px, calc(100% - 56px));
-    height: auto;
-    min-height: 100%;
-    overflow: visible;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .market-workspace {
@@ -1433,7 +1900,7 @@ function goShelfArea(direction: -1 | 1) {
     display: grid;
     grid-template-rows: auto auto;
     gap: 54px;
-    overflow: visible;
+    overflow: hidden;
   }
 
   .store-shelf {
@@ -1468,7 +1935,7 @@ function goShelfArea(direction: -1 | 1) {
 
   .overview-panel {
     min-height: 0;
-    overflow: visible;
+    overflow: hidden;
   }
 
   .overview-grid {
@@ -1495,7 +1962,7 @@ function goShelfArea(direction: -1 | 1) {
   .reputation-box {
     height: auto;
     min-height: 0;
-    overflow: visible;
+    overflow: hidden;
   }
 
   .activity-panel {
@@ -1508,9 +1975,9 @@ function goShelfArea(direction: -1 | 1) {
 
 @media (max-width: 767px) {
   .store-view-root {
-    height: auto;
-    min-height: 100%;
-    overflow: visible;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .market-page {
@@ -1519,10 +1986,10 @@ function goShelfArea(direction: -1 | 1) {
     grid-template-columns: 1fr;
     width: 100%;
     gap: 16px;
-    height: auto;
-    min-height: 100%;
+    height: 100%;
+    min-height: 0;
     padding-bottom: 76px;
-    overflow: visible;
+    overflow: hidden;
   }
 
   .market-workspace {
@@ -1530,7 +1997,7 @@ function goShelfArea(direction: -1 | 1) {
     display: grid;
     grid-template-rows: auto auto;
     gap: 16px;
-    overflow: visible;
+    overflow: hidden;
   }
 
   .store-shelf {
@@ -1716,6 +2183,53 @@ function goShelfArea(direction: -1 | 1) {
   .remove-modal {
     width: min(360px, 94vw);
     padding: 16px;
+  }
+
+  .inventory-modal {
+    width: min(430px, 94vw);
+    max-height: 88dvh;
+  }
+
+  .inventory-layout {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 0 12px 12px;
+  }
+
+  .inventory-grid {
+    grid-template-columns: repeat(2, minmax(104px, 1fr));
+    max-height: 48dvh;
+    padding: 12px;
+  }
+
+  .inventory-slot {
+    width: 100%;
+    min-height: 142px;
+    height: 142px;
+  }
+
+  .inventory-detail {
+    grid-template-columns: 54px minmax(0, 1fr);
+    align-items: center;
+    justify-items: stretch;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .inventory-detail .material-icon.large {
+    width: 54px;
+    height: 54px;
+    grid-row: span 3;
+  }
+
+  .inventory-detail small {
+    min-height: 0;
+    text-align: left;
+  }
+
+  .inventory-detail label,
+  .inventory-detail button {
+    grid-column: 1 / -1;
   }
 }
 </style>

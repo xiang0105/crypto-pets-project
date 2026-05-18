@@ -2,6 +2,14 @@ import type { PlayerProfile } from '@cryptopets/shared'
 import { supabase } from '../config/supabase.js'
 import { HttpError } from '../utils/httpError.js'
 
+export async function initializePlayerIfNeeded(userId: string) {
+  void userId
+  // Reserved for future chain sync:
+  // 1. Read ERC-721 pet ownership.
+  // 2. Read ERC-1155 material balances.
+  // 3. Mirror only indexable metadata needed by the API.
+}
+
 export async function getPlayerProfile(userId: string): Promise<PlayerProfile> {
   const { data: user, error: userError } = await supabase
     .from('users')

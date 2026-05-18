@@ -1,280 +1,156 @@
-# CryptoPets Production Architecture
+# CryptoPets
 
-CryptoPets 已重構為前後端分離的 Web3 遊戲架構。核心原則是：
+CryptoPets 是一個以「水豚寵物養成、遠征、材料、市場」為核心的 Web3 遊戲專案。專案最終目標是以上鏈資料作為真實狀態來源，目前仍在前端與 API 串接測試階段，因此先使用本地陣列與測試資料完成遊戲流程。
 
-```text
-鏈上只處理 NFT 資產所有權
-鏈下處理遊戲邏輯、玩家狀態、遠征獎勵、好友與社交資料
-```
+目前版本保留上鏈架構與資料同步入口，但尚未實作正式合約讀寫。前端登入後會先從鏈上資料提供器讀取玩家資產；現在的提供器會回傳空陣列，測試階段再由前端贈送四隻初始水豚來驗證流程。
 
-## 專案目錄
+## 專案結構
 
 ```text
 /
-├─ frontend/   Vite + Vue 3 + TypeScript 前端，部署到 Vercel
-├─ backend/    Node.js + Express + TypeScript API，部署到 Render
-├─ shared/     前後端共用 TypeScript 型別
-├─ README.md   最外層架構、部署、安全與資料夾說明
-├─ .env.example
-├─ package.json
-├─ package-lock.json
-└─ render.yaml
+├─ frontend/      Vue 3 + Vite + TypeScript 前端遊戲介面
+├─ backend/       Express + TypeScript 後端 API
+├─ game-content/  遊戲素材、寵物/材料格式、森林劇本與劇情內容
+├─ shared/        前後端共用 TypeScript 型別
+├─ DEV_PORTS.md   本地開發阜號說明
+├─ TODO.md        後續待實作事項
+└─ TODO_ONCHAIN.md 上鏈方向待辦
 ```
 
-## 各資料夾職責
+## 本地阜號
 
-### `frontend/`
+- Frontend: `http://localhost:5400`
+- Backend: `http://localhost:3400`
 
-玩家實際操作的遊戲介面。
+前端 Vite 已固定使用 `5400`，後端預設使用 `3400`。相關設定可參考 `DEV_PORTS.md`、`frontend/.env.example`、`backend/.env.example`。
 
-負責：
-
-- Vue 3 畫面、路由、互動與遊戲 UI
-- MetaMask 錢包連線與簽名登入流程
-- 呼叫 backend REST API
-- 顯示玩家、寵物、遠征、商店、好友等資料
-- 僅使用 `VITE_` 開頭的公開環境變數
-
-不負責：
-
-- 不計算正式遠征獎勵
-- 不直接修改玩家進度
-- 不持有 Supabase service role key
-- 不信任瀏覽器傳入的時間、獎勵、EXP 或 stats
-
-重要檔案：
-
-- `frontend/src/api/`：前端 API client
-- `frontend/src/composables/useWallet.ts`：MetaMask 簽名登入狀態
-- `frontend/vercel.json`：Vercel 部署與安全 headers
-- `frontend/.env.example`：前端公開環境變數範本
-- `frontend/README.md`：遊戲玩法與原本專案說明
-
-### `backend/`
-
-CryptoPets 的可信任遊戲伺服器。
-
-負責：
-
-- Wallet signature verification login
-- JWT API session
-- 玩家資料查詢
-- 遠征開始與獎勵領取
-- 使用 server time 計算遠征是否完成
-- 防止重複 claim
-- 驗證所有 API input
-- 寫入 Supabase PostgreSQL
-- 未來可加入 NFT ownership verification
-
-重要檔案：
-
-- `backend/src/app.ts`：Express app、CORS、Helmet、安全 middleware
-- `backend/src/routes/`：REST API 路由
-- `backend/src/controllers/`：HTTP controller
-- `backend/src/services/`：商業邏輯與 Supabase 操作
-- `backend/src/middleware/auth.ts`：JWT 驗證
-- `backend/supabase/schema.sql`：資料表、index、RLS policy
-- `backend/.env.example`：後端機密環境變數範本
-
-### `shared/`
-
-前後端共用型別，避免 API response 與前端資料模型分歧。
-
-負責：
-
-- `PlayerProfile`
-- `PlayerPet`
-- `ExpeditionSummary`
-- `ExpeditionReward`
-- `FriendSummary`
-- Auth API response types
-
-重要檔案：
-
-- `shared/src/index.ts`
-
-## 架構大綱
-
-```text
-MetaMask
-   │
-   │ wallet signature
-   ▼
-frontend (Vercel)
-   │
-   │ REST API + JWT
-   ▼
-backend (Render)
-   │
-   │ service role, server-side validation
-   ▼
-Supabase PostgreSQL
-```
-
-區塊鏈互動只應用於：
-
-- 驗證 NFT 擁有權
-- 讀取鏈上 token / contract / owner 資訊
-- 必要時執行資產交易或 mint/burn 流程
-
-遊戲邏輯保留在 backend：
-
-- expedition start / claim
-- reward calculation
-- EXP / stats / progression
-- friends / friend requests
-- marketplace 狀態
-- anti-cheat validation
-
-## API 大綱
-
-Auth:
-
-- `POST /auth/nonce`
-- `POST /auth/login`
-
-Player:
-
-- `GET /player`
-
-Expedition:
-
-- `POST /start-expedition`
-- `POST /claim-reward`
-
-Social:
-
-- `POST /add-friend`
-- `GET /friends`
-
-## Supabase 資料表
-
-Schema 在 `backend/supabase/schema.sql`。
-
-目前設計：
-
-- `users`：wallet identity、username
-- `auth_nonces`：wallet login challenge，避免重放簽名
-- `pets`：off-chain pet metadata / stats / exp
-- `expeditions`：遠征狀態、server time、claim reward
-- `friends`：好友關係
-- `friend_requests`：好友邀請
-
-所有 table 都啟用 RLS。正式 game mutation 由 backend 使用 service role key 執行，service role key 不得暴露到 frontend。
-
-## 環境變數
-
-根目錄 `.env.example` 是總覽範本。
-
-Frontend 只允許公開變數：
-
-```text
-VITE_API_BASE_URL
-VITE_SUPABASE_URL
-VITE_SUPABASE_ANON_KEY
-VITE_CHAIN_ID
-VITE_NFT_CONTRACT_ADDRESS
-```
-
-Backend 可使用機密：
-
-```text
-SUPABASE_SERVICE_ROLE_KEY
-JWT_SECRET
-RPC_URL
-NFT_CONTRACT_ADDRESS
-CORS_ORIGIN
-WEB3_LOGIN_DOMAIN
-```
-
-不要把 backend secrets 放進任何 `VITE_` 變數。
-
-## 本機開發
-
-安裝 dependencies：
+## 快速開始
 
 ```bash
 npm install
 ```
 
-建立 env：
+建立環境變數：
 
 ```bash
 cp frontend/.env.example frontend/.env
 cp backend/.env.example backend/.env
 ```
 
-建立 Supabase schema：
-
-```text
-在 Supabase SQL editor 執行 backend/supabase/schema.sql
-```
-
-啟動：
+啟動後端：
 
 ```bash
 npm run dev:backend
+```
+
+啟動前端：
+
+```bash
 npm run dev:frontend
 ```
 
-Build：
+建置全部 workspace：
 
 ```bash
 npm run build
 ```
 
-## 部署
+型別檢查：
 
-### Vercel Frontend
-
-Project root：
-
-```text
-frontend
+```bash
+npm run type-check
 ```
 
-設定：
+## 目前完成內容
 
-- Build command: `npm run build`
-- Output directory: `dist`
-- Environment variables: 只設定 `VITE_` 開頭的公開變數
+### 前端
 
-`frontend/vercel.json` 已加入：
+- 使用 Vue 3、Vite、TypeScript 建立遊戲介面。
+- 預設啟用前端測試登入模式：`VITE_FRONTEND_ONLY_AUTH=true`。
+- 首頁進入時會呼叫 MetaMask 登入，登入畫面只顯示背景、唯讀錢包地址 input 與確認按鈕。
+- 確認按鈕會在取得錢包地址後才可點擊。
+- 測試階段每次登入都視為新用戶，顯示贈送四隻初始水豚的彈跳視窗。
+- 贈送彈窗已顯示四隻水豚圖片：Capy-san、Yuzu-boy、Koko、Bobo。
+- 初始水豚等級為 0，經驗值從 0 開始。
+- 遠征完成後，測試階段會用本地狀態提升參與遠征水豚的等級。
+- 技能點數只在寵物每升 1 等時增加 1 點。
+- 技能等級初始值為 1。
+- 遠征紀錄已調整為正確順序，目前狀態會顯示選擇的森林開始狀態。
+- 寵物資料站、隊伍、升級、市場、材料上架彈窗已有目前測試用 UI。
+- 若寵物資料站沒有選擇寵物，會在區塊中央顯示「尚未選擇任一寵物」。
+- 市場區塊在沒有商品時保留格子版型，不顯示「尚未上架」類文字。
+- 前端保留鏈上資料同步入口：`frontend/src/web3/chainData.ts`。
 
-- `X-Content-Type-Options`
-- `X-Frame-Options`
-- `Referrer-Policy`
-- `Permissions-Policy`
-- `Content-Security-Policy`
+### 後端
 
-### Render Backend
+- 使用 Express、TypeScript 建立 API server。
+- 後端預設 port 為 `3400`。
+- 已建立 wallet nonce、MetaMask 簽名驗證與 JWT 登入流程。
+- 已建立玩家、遠征、資源、市場、交易、好友等 API。
+- 已建立 Supabase schema，包含 users、auth_nonces、pets、pet_teams、currencies、inventory、market_listings、transactions、expeditions、friends、friend_requests。
+- `playerService.initializePlayerIfNeeded` 目前保留為上鏈同步入口，不再自動產生寵物、材料或金幣。
+- 提供 `backend/supabase/clear_game_data.sql` 作為開發或測試資料重置腳本。
 
-Root directory：
+### Shared
+
+- `shared/src/index.ts` 放置前後端共用型別。
+- 已包含錢包、玩家、寵物、遠征、好友、資源、市場與交易相關型別。
+
+### Game Content
+
+- `game-content/src/capybaras.ts` 放置水豚格式、初始四隻水豚資料與圖片 asset 路徑。
+- `game-content/src/materials.ts` 放置材料格式、素材定義與素材圖片 frame 路徑。
+- `game-content/src/stories.ts` 放置森林劇本、事件條件、隊長屬性與能力值分歧結局。
+- `game-content/assets/` 放置水豚與素材圖片，前端用 `@game-content/assets/...` 載入。
+- 前端與後端透過 `@cryptopets/game-content` 共用遊戲內容資料。
+
+## 目前資料策略
+
+最終版本會以鏈上資訊作為玩家資產來源：
+
+- ERC-721：寵物 NFT。
+- ERC-1155：材料或消耗品 SFT。
+- 合約事件或索引器：市場、交易與資產同步。
+- 後端資料庫：快取、索引、權限驗證、排行榜、非鏈上輔助資料。
+
+目前測試階段：
+
+- 前端登入只連接 MetaMask 錢包地址。
+- `VITE_FRONTEND_ONLY_AUTH=true` 時不會呼叫後端 `/auth/nonce`。
+- 鏈上資料提供器暫時回傳空資料。
+- 測試用四隻水豚在前端登入確認後贈送。
+- 每次重新整理或重新登入都從測試初始狀態開始，方便驗證升級與 UI 流程。
+
+若要測試正式後端簽名登入，將前端 `.env` 改成：
 
 ```text
-backend
+VITE_FRONTEND_ONLY_AUTH=false
 ```
 
-設定：
+並確認後端 `.env` 內的 Supabase、JWT、CORS 與 Web3 設定正確。
 
-- Build command: `npm install && npm run build`
-- Start command: `node dist/index.js`
+## API 概覽
 
-必要環境變數：
+- `GET /health`
+- `POST /auth/nonce`
+- `POST /auth/login`
+- `GET /player`
+- `GET /resources`
+- `POST /start-expedition`
+- `POST /claim-reward`
+- `GET /market/listings`
+- `POST /market/listings`
+- `POST /market/cancel-listing`
+- `POST /market/buy-listing`
+- `GET /transactions`
+- `POST /add-friend`
+- `GET /friends`
 
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `JWT_SECRET`
-- `CORS_ORIGIN`
-- `WEB3_LOGIN_DOMAIN`
+## 部署方向
 
-## 已修正的主要架構問題
+- Frontend 可部署至 Vercel 或其他靜態站台服務。
+- Backend 可部署至 Render 或其他 Node.js server 平台。
+- Supabase 用於資料庫與後端服務資料。
+- 正式上鏈後，需要補上合約部署、RPC、chain id、contract address、token metadata 與索引器設定。
 
-- 原本 demo local arrays / Vue refs 是權威遊戲狀態，已改為 backend + database ownership
-- 原本 wallet connect 只取得 address，已改為 nonce + MetaMask signature verification
-- 遠征獎勵不再由 frontend 計算
-- Claim 使用 backend server time
-- Claim update 檢查 `status = 'started'`，避免重複領取
-- Backend 使用 `zod` 驗證 input
-- Backend secrets 不進 frontend bundle
-- Supabase tables 全部啟用 RLS
+後續要做的功能請看 `TODO.md`；上鏈相關細節請看 `TODO_ONCHAIN.md`。

@@ -4,6 +4,11 @@ import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import { isZh, locale, toggleLocale } from './i18n'
 import { useWallet } from '@/composables/useWallet'
+import { createStarterPets, replacePets } from '@/data/pets'
+import { setExpeditionTeam } from '@/state/expeditionTeam'
+import { resetTestProgress } from '@/state/testProgress'
+import { capybaraImageBySlug } from '@/content/gameAssets'
+import { starterCapybaras } from '@cryptopets/game-content'
 import readmeContent from '@/content/help.md?raw'
 import backgroundMusicUrl from '@/assets/music/Capybara_Meadow.mp3'
 
@@ -20,10 +25,18 @@ const actionItems = [
   { label: '顏色對調', icon: 'circle-half-stroke' },
 ]
 
+const starterGiftPets = starterCapybaras.map((pet) => ({
+  name: pet.name,
+  image: capybaraImageBySlug[pet.slug],
+}))
+
 const isMonoMode = ref(false)
 const isHelpPanelOpen = ref(false)
 const isMusicEnabled = ref(false)
 const isMusicPlaying = ref(false)
+const isLoginConfirmed = ref(false)
+const isStarterGiftOpen = ref(false)
+const loginNotice = ref('')
 const backgroundMusic = ref<HTMLAudioElement | null>(null)
 const { walletAddress, walletError, shortWalletAddress, connectWallet, restoreSession } = useWallet()
 const route = useRoute()
@@ -42,6 +55,8 @@ const renderedReadme = computed(() => markdown.render(readmeContent))
 const musicButtonIcon = computed(() => (isMusicPlaying.value ? 'music' : 'volume-xmark'))
 
 const visibleActionItems = computed(() => actionItems)
+const canConfirmLogin = computed(() => Boolean(walletAddress.value))
+const walletInputPlaceholder = computed(() => walletError.value || 'Waiting for MetaMask wallet address')
 
 const currentPageIndex = computed(() => {
   const index = pageOrder.indexOf(route.path)
@@ -117,28 +132,48 @@ function handleAction(icon: string) {
 
 }
 
-async function connectMetaMask() {
-  walletError.value = ''
-
-  if (!window.ethereum) {
-    walletError.value = 'MetaMask is not installed'
-    window.alert(isZh.value ? '找不到 MetaMask，請先安裝錢包。' : 'MetaMask is not installed.')
+async function startLoginFlow() {
+  if (walletAddress.value) {
+    loginNotice.value = 'Wallet detected. Confirm to enter.'
     return
   }
 
-  try {
-    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' })
+  loginNotice.value = 'Opening MetaMask...'
 
-    if (Array.isArray(accounts) && typeof accounts[0] === 'string') {
-      walletAddress.value = accounts[0]
-    }
-  } catch (error) {
-    walletError.value = error instanceof Error ? error.message : 'Wallet connection failed'
+  try {
+    await connectWallet()
+    loginNotice.value = 'Wallet connected. Confirm to enter.'
+  } catch {
+    loginNotice.value = walletError.value || 'MetaMask login failed.'
   }
 }
 
-onMounted(() => {
-  void restoreSession()
+function confirmLogin() {
+  if (!canConfirmLogin.value) {
+    return
+  }
+
+  isLoginConfirmed.value = true
+  grantTestingStarterPets()
+  void playBackgroundMusic()
+}
+
+function grantTestingStarterPets() {
+  const starterPets = createStarterPets(walletAddress.value)
+
+  resetTestProgress()
+  replacePets(starterPets)
+  setExpeditionTeam(starterPets.map((pet) => pet.id))
+  isStarterGiftOpen.value = true
+}
+
+function closeStarterGift() {
+  isStarterGiftOpen.value = false
+}
+
+onMounted(async () => {
+  await restoreSession()
+  void startLoginFlow()
   void playBackgroundMusic()
 })
 
@@ -150,6 +185,29 @@ onBeforeUnmount(() => {
 <template>
   <audio ref="backgroundMusic" :src="backgroundMusicUrl" loop preload="auto"></audio>
 
+  <section v-if="!isLoginConfirmed" class="login-gate" aria-label="MetaMask login">
+    <div class="login-box">
+      <input
+        class="wallet-address-input"
+        type="text"
+        :value="walletAddress"
+        :placeholder="walletInputPlaceholder"
+        readonly
+        aria-label="Wallet address"
+      />
+      <button
+        class="confirm-login-button"
+        type="button"
+        :disabled="!canConfirmLogin"
+        @click="confirmLogin"
+      >
+        Confirm
+      </button>
+      <p class="login-notice" aria-live="polite">{{ loginNotice }}</p>
+    </div>
+  </section>
+
+  <template v-else>
   <header class="game-header" :class="{ 'is-mono-mode': isMonoMode }">
     <div class="nav-shell">
       <nav class="main-nav" aria-label="Primary navigation">
@@ -257,9 +315,102 @@ onBeforeUnmount(() => {
       <div class="markdown-body" v-html="renderedReadme"></div>
     </section>
   </div>
+
+  <div
+    v-if="isStarterGiftOpen"
+    class="modal-overlay starter-gift-overlay"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="starter-gift-title"
+    @click.self="closeStarterGift"
+  >
+    <section class="starter-gift-panel">
+      <h2 id="starter-gift-title">{{ isZh ? '測試階段贈送水豚' : 'Testing Starter Pets' }}</h2>
+      <p>
+        {{
+          isZh
+            ? '目前測試階段每次登入都會視為新用戶，贈送原先四隻水豚。未來正式上鏈後，會改成依錢包是否曾登入遊戲與鏈上領取紀錄判斷。'
+            : 'During testing, every login is treated as a new user and receives the original four capybaras. After launch, this will depend on wallet login history and on-chain claim records.'
+        }}
+      </p>
+      <div class="starter-gift-list" aria-label="Gifted capybaras">
+        <article v-for="pet in starterGiftPets" :key="pet.name" class="starter-gift-card">
+          <img :src="pet.image" :alt="pet.name" draggable="false" />
+          <span>{{ pet.name }}</span>
+        </article>
+      </div>
+      <button type="button" @click="closeStarterGift">{{ isZh ? '收下' : 'Accept' }}</button>
+    </section>
+  </div>
+  </template>
 </template>
 
 <style scoped>
+.login-gate {
+  display: grid;
+  place-items: center;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  padding: 24px;
+  background: #fff7df;
+}
+
+.login-box {
+  display: grid;
+  grid-template-columns: minmax(0, 420px) 128px;
+  gap: 12px;
+  align-items: center;
+  width: min(620px, 100%);
+}
+
+.wallet-address-input {
+  min-width: 0;
+  height: 48px;
+  padding: 0 14px;
+  color: #2f7180;
+  font-family: 'Trebuchet MS', Verdana, 'Microsoft JhengHei', sans-serif;
+  font-size: 15px;
+  font-weight: 900;
+  background: #ffffff;
+  border: 4px solid #3b7b89;
+  border-radius: 8px;
+  outline: none;
+}
+
+.wallet-address-input::placeholder {
+  color: rgba(47, 113, 128, 0.55);
+}
+
+.confirm-login-button {
+  height: 48px;
+  color: #fff7df;
+  font-family: 'Trebuchet MS', Verdana, 'Microsoft JhengHei', sans-serif;
+  font-size: 16px;
+  font-weight: 900;
+  cursor: pointer;
+  background: #2f7180;
+  border: 4px solid #3b7b89;
+  border-radius: 8px;
+}
+
+.confirm-login-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  filter: grayscale(0.5);
+}
+
+.login-notice {
+  grid-column: 1 / -1;
+  min-height: 20px;
+  margin: 0;
+  color: #6f4228;
+  font-family: 'Trebuchet MS', Verdana, 'Microsoft JhengHei', sans-serif;
+  font-size: 13px;
+  font-weight: 900;
+  text-align: center;
+}
+
 .game-header {
   position: sticky;
   top: 0;
@@ -413,6 +564,10 @@ onBeforeUnmount(() => {
 .action-button.active {
   color: #fff7df;
   background: #2f7180;
+  box-shadow:
+    inset 0 0 0 999px #2f7180,
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 2px 0 rgba(39, 94, 107, 0.35);
 }
 
 .locale-button {
@@ -427,6 +582,7 @@ onBeforeUnmount(() => {
 .page-content {
   position: relative;
   height: calc(100vh - 75px);
+  height: calc(100dvh - 75px);
   overflow: hidden;
   padding: 28px 18px 18px;
   background:
@@ -554,6 +710,91 @@ onBeforeUnmount(() => {
   border-radius: 11px;
 }
 
+.starter-gift-overlay {
+  z-index: 48;
+}
+
+.starter-gift-panel {
+  display: grid;
+  gap: 14px;
+  width: min(520px, 92vw);
+  padding: 22px;
+  color: #4b241d;
+  font-family: 'Trebuchet MS', Verdana, 'Microsoft JhengHei', sans-serif;
+  background: #fff3ca;
+  border: 5px solid #6a351f;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 3px rgba(255, 218, 152, 0.56),
+    0 12px 0 rgba(72, 41, 24, 0.24);
+}
+
+.starter-gift-panel h2,
+.starter-gift-panel p {
+  margin: 0;
+}
+
+.starter-gift-panel h2 {
+  font-size: 25px;
+  font-weight: 1000;
+  text-align: center;
+}
+
+.starter-gift-panel p {
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.45;
+}
+
+.starter-gift-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.starter-gift-card {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 82px;
+  padding: 8px 10px;
+  background: #a76438;
+  border: 3px solid #6a351f;
+  border-radius: 8px;
+}
+
+.starter-gift-card img {
+  width: 64px;
+  height: 58px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 0 rgba(72, 41, 24, 0.22));
+  user-select: none;
+}
+
+.starter-gift-card span {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  color: #fff3ca;
+  font-size: 16px;
+  font-weight: 1000;
+  text-align: center;
+}
+
+.starter-gift-panel button {
+  justify-self: center;
+  min-width: 128px;
+  min-height: 42px;
+  color: #26582b;
+  font-size: 17px;
+  font-weight: 1000;
+  cursor: pointer;
+  background: linear-gradient(#c8e89e, #7fc165);
+  border: 4px solid #6a351f;
+  border-radius: 9px;
+}
+
 .markdown-body {
   max-height: calc(min(720px, 86vh) - 70px);
   padding: 18px 22px 24px;
@@ -630,7 +871,7 @@ onBeforeUnmount(() => {
 @media (min-width: 901px) and (max-width: 1199px) {
   .page-content {
     height: calc(100dvh - 75px);
-    overflow-y: auto;
+    overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
   }
 }
@@ -680,7 +921,7 @@ onBeforeUnmount(() => {
 
   .page-content {
     height: calc(100dvh - 132px);
-    overflow-y: auto;
+    overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
   }
 
@@ -761,7 +1002,7 @@ onBeforeUnmount(() => {
 
   .page-content {
     height: calc(100dvh - 118px);
-    overflow-y: auto;
+    overflow-y: hidden;
     padding: 14px 10px 18px;
     -webkit-overflow-scrolling: touch;
   }

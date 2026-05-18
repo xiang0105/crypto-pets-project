@@ -1,152 +1,135 @@
-# CryptoPets: 鏈上寵物養成 DApp
+# CryptoPets Frontend
 
-一個結合 ERC-721（NFT）與 ERC-1155（SFT）的 Web3 遊戲專案，實現養成、戰鬥與去中心化資產交易。
+CryptoPets 前端是 Vue 3 + Vite + TypeScript 製作的水豚養成遊戲介面。現在以測試模式優先完成遊戲 UI、MetaMask 登入、遠征、寵物資料站與市場版型；未來會把目前的本地測試資料改成鏈上資料。
 
----
+## 開發資訊
 
-## 專案概述 (Overview)
+- Dev server: `http://localhost:5400`
+- API base: `http://localhost:3400`
+- Framework: Vue 3
+- Build tool: Vite
+- Language: TypeScript
 
-CryptoPets 是一款混合式鏈上遊戲（Hybrid On-chain Game），設計核心為：
+## 啟動方式
 
-「鏈下負責遊戲體驗，鏈上負責資產所有權」
+在專案根目錄執行：
 
-此架構可降低 Gas 消耗並提升遊戲流暢度，同時保留資產所有權與可交易性。
-
----
-
-## 核心玩法 (Core Gameplay)
-
-### 寵物養成系統
-
-- 五大屬性：火、水、草、光、暗
-- 每隻寵物具有：
-  - 個體值（IV）
-  - HP / ATK / DEF
-  - 三階段進化
-
----
-
-### 遠征系統
-
-- 自動累積資源
-- 支援離線收益
-- 批次領取（Claim）
-
----
-
-### 經濟與交易
-
-- NFT 可交易
-- SFT 可流通
-- 支援 P2P 交易
-
----
-
-## 技術架構 (Tech Stack)
-
-### 區塊鏈
-
-- Solidity
-- ERC-721 / ERC-1155
-
-### 前端
-
-- HTML / CSS / JavaScript
-- Phaser3
-
-### Web3
-
-- Ethers.js / Web3.js
-- MetaMask
-
----
-
-## 資料結構 (Data Schema)
-
-### 寵物 NFT
-
-```javascript
-{
-    "id": "",
-    "name": "",
-    "element": 1, // 元素屬性：[火、水、草、光、暗]
-    "stage": 0, // 寵物階段：[0、1、2]
-    "tokenURI": "",
-    "stats": {
-        "iv": 95,
-        "hp": 120,
-        "atk": 45,
-        "def": 30
-    },
-    "exp": 1500, // 寵物升級所需經驗值
-    "owner": "",
-    "birthTime": ""
-}
+```bash
+npm run dev:frontend
 ```
 
----
+或在 `frontend/` 目錄執行：
 
-### 素材 SFT
-
-```javascript
-{
-    "id": "MAT-1C",
-    "name": "",
-    "element": 1, // 素材屬性：[火、水、草、光、暗]
-    "grade": "C", // 素材等級：[A、B、C]
-    "amount": 0,
-    "description": ""
-}
+```bash
+npm run dev
 ```
 
----
+建置：
 
-### 回憶錄
-
-```javascript
-{
-    "tokenId": "",
-    "totalBattles": 0, // 總戰場場
-    "winRate": 0.65, // 勝率
-    "adventures": 0, // 累積遠征獎勵
-    "Owners": "", // 目前的玩家
-    "status": "Active" // 狀態
-}
+```bash
+npm run build
 ```
 
----
+型別檢查：
 
-## 進化系統
-
-```javascript
-const EVOLUTION_CONFIG = {
-    "ELEMENT_1": {
-        "TO_STAGE_1": {
-            "requiredMat": [
-                { "id": "MAT-1C", "count": 5 }
-            ],
-            "statsBoost": 10
-        }
-    }
-};
+```bash
+npm run type-check
 ```
 
----
+## 環境變數
 
-## 遠征系統特點
+請由 `frontend/.env.example` 建立 `frontend/.env`。
 
-1. 玩家派出寵物
-2. 記錄時間
-3. 累積獎勵
-4. Claim 上鏈
+```text
+VITE_API_BASE_URL=http://localhost:3400
+VITE_FRONTEND_ONLY_AUTH=true
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-public-anon-key
+VITE_CHAIN_ID=1
+VITE_NFT_CONTRACT_ADDRESS=0x0000000000000000000000000000000000000000
+```
 
----
+### 測試登入模式
 
-## 未來規劃
+目前預設：
 
-- PvP 系統 <!-- 可能沒有 -->
-- 公會系統
-- DAO 治理
-- Layer2 部署
+```text
+VITE_FRONTEND_ONLY_AUTH=true
+```
 
----
+此模式只透過 MetaMask 取得錢包地址，不會呼叫後端 `/auth/nonce` 與 `/auth/login`。這是為了先測試前端流程，避免尚未完成的後端或鏈上服務阻擋 UI 測試。
+
+若要測試後端簽名登入，改成：
+
+```text
+VITE_FRONTEND_ONLY_AUTH=false
+```
+
+## 目前頁面與流程
+
+- 登入入口：啟動後自動開啟 MetaMask 連接錢包。
+- 登入確認畫面：顯示唯讀錢包地址 input 與確認按鈕，取得地址前不可確認。
+- 測試贈送彈窗：每次登入都視為新用戶，贈送四隻初始水豚。
+- 首頁遠征：選擇森林、開始探索、顯示遠征狀態與事件紀錄。
+- 寵物資料站：顯示隊伍、寵物列表、寵物資料、技能升級與進階材料。
+- 市場：顯示上架商品格、近期交易、市場評價與材料上架彈窗。
+
+## 測試資料
+
+測試階段的四隻水豚由 `frontend/src/data/pets.ts` 建立：
+
+- Capy-san：`TEST-PET-001`
+- Yuzu-boy：`TEST-PET-002`
+- Koko：`TEST-PET-003`
+- Bobo：`TEST-PET-004`
+
+目前規則：
+
+- 初始等級為 0。
+- 初始經驗值為 0。
+- 技能等級初始值為 1。
+- 技能點數初始值為 0。
+- 遠征完成後會用本地測試狀態增加寵物經驗與等級。
+- 每升 1 等才會增加 1 點技能點數。
+- 每次重啟或重新登入會回到測試初始狀態。
+
+正式上鏈後，寵物等級、經驗、材料、是否領過初始水豚，都應該改由鏈上資料或鏈上索引結果判斷。
+
+## 鏈上資料入口
+
+鏈上資料抽象放在：
+
+```text
+frontend/src/web3/chainData.ts
+```
+
+目前的 `localEmptyChainDataProvider` 會回傳空寵物與空材料。未來要在這裡改接：
+
+- RPC 或合約讀取。
+- NFT/SFT ownership 查詢。
+- token metadata 解析。
+- indexer 或後端同步 API。
+
+## 主要目錄
+
+```text
+src/
+├─ api/          REST API client
+├─ assets/       圖片、音樂與遊戲素材
+├─ content/      將 game-content 圖片轉成前端可用 asset mapping
+├─ composables/  MetaMask 與登入狀態
+├─ data/         測試用寵物與材料資料
+├─ router/       Vue Router
+├─ state/        前端測試狀態
+├─ views/        Home、Pets、Store 頁面
+└─ web3/         鏈上資料抽象
+```
+
+共用遊戲內容放在根目錄 `game-content/`，前端透過 `@cryptopets/game-content` 讀水豚、材料與劇本資料，並透過 `@game-content/assets/...` 載入圖片。
+
+## 注意事項
+
+- 前端不應放入 Supabase service role key、私鑰或任何後端 secret。
+- `VITE_` 開頭的變數會被打包到瀏覽器端。
+- 目前前端是測試狀態，資料不代表正式鏈上狀態。
+- 未來接上正式鏈上資料後，應移除或隔離測試贈送流程。

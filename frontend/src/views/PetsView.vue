@@ -3,22 +3,21 @@ import { computed, ref } from 'vue'
 import { goodies } from '@/data/goodies'
 import { pets, type Pet } from '@/data/pets'
 import { expeditionTeamIds, isPetInExpeditionTeam, maxTeamSlots, setExpeditionTeamSlot } from '@/state/expeditionTeam'
+import { availableSkillPoints, spendSkillPoint } from '@/state/testProgress'
 import { isZh } from '@/i18n'
-import boboImage from '@/assets/capybaras/bobo.png'
-import capySanImage from '@/assets/capybaras/capy-san.png'
-import kokoImage from '@/assets/capybaras/koko.png'
-import yuzuBoyImage from '@/assets/capybaras/yuzu-boy.png'
+import { petImages } from '@/content/gameAssets'
 
 const maxPetSlots = 20
-const selectedPetId = ref(pets[0]?.id ?? '')
+const localPets = ref<Pet[]>(pets.map((pet) => ({
+  ...pet,
+  stats: { ...pet.stats },
+  exp: { ...pet.exp },
+})))
+const selectedPetId = ref(localPets.value[0]?.id ?? '')
 const activeTeamSlotIndex = ref<number | null>(null)
-
-const petImages: Record<string, string> = {
-  'PET-001': capySanImage,
-  'PET-002': yuzuBoyImage,
-  'PET-003': kokoImage,
-  'PET-004': boboImage,
-}
+const petFilterMode = ref<'all' | 'team' | 'available' | 'level'>('all')
+const skillLevels = ref([1, 1])
+const nurtureMessage = ref('')
 
 const elementLabel: Record<Pet['element'], { zh: string; en: string; mark: string }> = {
   citrus: { zh: '柑橘', en: 'Citrus', mark: 'C' },
@@ -71,15 +70,32 @@ const text = computed(() => ({
   confirmBreakthrough: isZh.value ? '確認突破' : 'Confirm Breakthrough',
 }))
 
-const selectedPet = computed(() => pets.find((pet) => pet.id === selectedPetId.value) ?? pets[0])
+const selectedPet = computed(() => localPets.value.find((pet) => pet.id === selectedPetId.value) ?? localPets.value[0])
+const visiblePets = computed(() => {
+  const sortedPets = [...localPets.value]
+
+  if (petFilterMode.value === 'team') {
+    return sortedPets.filter((pet) => isPetInExpeditionTeam(pet.id))
+  }
+
+  if (petFilterMode.value === 'available') {
+    return sortedPets.filter((pet) => !isPetInExpeditionTeam(pet.id))
+  }
+
+  if (petFilterMode.value === 'level') {
+    return sortedPets.sort((petA, petB) => petLevel(petB) - petLevel(petA))
+  }
+
+  return sortedPets
+})
 const teamSlots = computed<(Pet | null)[]>(() => {
-  const teamPets = expeditionTeamIds.value.map((id) => pets.find((pet) => pet.id === id) ?? null)
+  const teamPets = expeditionTeamIds.value.map((id) => localPets.value.find((pet) => pet.id === id) ?? null)
 
   return [...teamPets, ...Array.from({ length: Math.max(0, maxTeamSlots - teamPets.length) }, () => null)]
 })
 const petSlots = computed<(Pet | null)[]>(() => [
-  ...pets,
-  ...Array.from({ length: Math.max(0, maxPetSlots - pets.length) }, () => null),
+  ...visiblePets.value,
+  ...Array.from({ length: Math.max(0, maxPetSlots - visiblePets.value.length) }, () => null),
 ])
 const breakthroughRows = computed(() =>
   breakthroughMaterials.map((requirement) => ({
@@ -111,8 +127,8 @@ const selectedIntro = computed(() => {
     : `${pet.name} is a ${elementName.toLowerCase()} capybara built for steady adventures, material gathering, and team support.`
 })
 const skillRows = computed(() => [
-  { name: text.value.napAttack, value: isZh.value ? '降低疲勞，提升續航。' : 'Reduces fatigue and improves sustain.', points: 1, max: 5 },
-  { name: text.value.bash, value: isZh.value ? '造成穩定衝撞傷害。' : 'Deals steady bash damage.', points: 2, max: 5 },
+  { name: text.value.napAttack, value: isZh.value ? '降低疲勞，提升續航。' : 'Reduces fatigue and improves sustain.', points: skillLevels.value[0] ?? 0, max: 5 },
+  { name: text.value.bash, value: isZh.value ? '造成穩定衝撞傷害。' : 'Deals steady bash damage.', points: skillLevels.value[1] ?? 0, max: 5 },
 ])
 
 const slotHint = computed(() => {
@@ -122,9 +138,24 @@ const slotHint = computed(() => {
 
   return isZh.value ? `第 ${activeTeamSlotIndex.value + 1} 格` : `Slot ${activeTeamSlotIndex.value + 1}`
 })
+const filterLabel = computed(() => {
+  if (petFilterMode.value === 'team') {
+    return isZh.value ? '只看隊伍' : 'Team only'
+  }
+
+  if (petFilterMode.value === 'available') {
+    return isZh.value ? '只看可派遣' : 'Available'
+  }
+
+  if (petFilterMode.value === 'level') {
+    return isZh.value ? '等級排序' : 'Level high'
+  }
+
+  return text.value.filterSort
+})
 
 function petLevel(pet: Pet) {
-  return pet.stage * 10 + (pet.stats.iv % 10)
+  return pet.level
 }
 
 function selectPet(pet: Pet) {
@@ -148,6 +179,47 @@ function assignPetToActiveSlot(pet: Pet) {
   setExpeditionTeamSlot(activeTeamSlotIndex.value, pet.id)
   selectedPetId.value = pet.id
   activeTeamSlotIndex.value = null
+}
+
+function cyclePetFilter() {
+  const modes: Array<typeof petFilterMode.value> = ['all', 'team', 'available', 'level']
+  const nextIndex = (modes.indexOf(petFilterMode.value) + 1) % modes.length
+  petFilterMode.value = modes[nextIndex] ?? 'all'
+}
+
+function addSkillPoint(skillIndex: number) {
+  const currentLevel = skillLevels.value[skillIndex] ?? 0
+
+  if (availableSkillPoints.value <= 0 || currentLevel >= 5) {
+    nurtureMessage.value = isZh.value ? '沒有可用技能點。' : 'No skill points available.'
+    return
+  }
+
+  if (!spendSkillPoint()) {
+    nurtureMessage.value = isZh.value ? '沒有可用技能點。' : 'No skill points available.'
+    return
+  }
+
+  skillLevels.value = skillLevels.value.map((level, index) => (index === skillIndex ? level + 1 : level))
+  nurtureMessage.value = isZh.value ? '技能已升級。' : 'Skill upgraded.'
+}
+
+function confirmBreakthrough() {
+  const pet = selectedPet.value
+
+  if (!pet || !canStageBreakthrough.value) {
+    nurtureMessage.value = isZh.value ? '尚未達成進階條件。' : 'Advance requirements are not met.'
+    return
+  }
+
+  pet.stage += 1
+  pet.exp.current = 0
+  pet.exp.next += 300
+  pet.stats.maxHp += 12
+  pet.stats.hp = pet.stats.maxHp
+  pet.stats.atk += 6
+  pet.stats.def += 5
+  nurtureMessage.value = isZh.value ? '進階完成。' : 'Advance complete.'
 }
 </script>
 
@@ -184,7 +256,7 @@ function assignPetToActiveSlot(pet: Pet) {
       </div>
 
       <div class="filter-row">
-        <button type="button">{{ text.filterSort }}</button>
+        <button type="button" @click="cyclePetFilter">{{ filterLabel }}</button>
         <span class="slot-hint">{{ slotHint }}</span>
       </div>
 
@@ -217,6 +289,10 @@ function assignPetToActiveSlot(pet: Pet) {
         <h2>{{ text.stationTitle }}</h2>
       </header>
 
+      <div v-if="!selectedPet" class="no-selected-pet">
+        {{ isZh ? '尚未選擇任一寵物' : 'No pet selected' }}
+      </div>
+
       <article v-if="selectedPet" class="pet-detail">
         <div class="detail-portrait">
           <img :src="petImages[selectedPet.id]" :alt="selectedPet.name" draggable="false" />
@@ -241,7 +317,7 @@ function assignPetToActiveSlot(pet: Pet) {
         </div>
       </article>
 
-      <div class="nurture-grid">
+      <div v-if="selectedPet" class="nurture-grid">
         <section v-if="selectedPet" class="nurture-card preview-card">
           <h3>{{ text.intro }}</h3>
           <div class="info-content">
@@ -280,15 +356,18 @@ function assignPetToActiveSlot(pet: Pet) {
           <h3>{{ text.upgrade }}</h3>
 
           <div class="upgrade-section skill-upgrade">
-            <h4>{{ text.skillUpgrade }} <span>{{ text.skillPoints }}: 2</span></h4>
-            <article v-for="skill in skillRows" :key="skill.name" class="skill-point-row">
+            <h4>{{ text.skillUpgrade }} <span>{{ text.skillPoints }}: {{ availableSkillPoints }}</span></h4>
+            <article v-for="(skill, index) in skillRows" :key="skill.name" class="skill-point-row">
               <div>
                 <strong>{{ skill.name }}</strong>
                 <span>{{ skill.value }}</span>
               </div>
               <strong class="skill-level-badge">{{ skill.points }} / {{ skill.max }}</strong>
-              <button type="button">{{ text.addPoint }}</button>
+              <button type="button" :disabled="availableSkillPoints <= 0 || skill.points >= skill.max" @click="addSkillPoint(index)">
+                {{ text.addPoint }}
+              </button>
             </article>
+            <p v-if="nurtureMessage" class="nurture-message">{{ nurtureMessage }}</p>
           </div>
 
           <div class="upgrade-section upgrade-breakthrough">
@@ -308,7 +387,7 @@ function assignPetToActiveSlot(pet: Pet) {
                 <strong>x{{ row.count }}</strong>
               </article>
             </div>
-            <button class="breakthrough-button" type="button" :disabled="!canStageBreakthrough">
+            <button class="breakthrough-button" type="button" :disabled="!canStageBreakthrough" @click="confirmBreakthrough">
               {{ isZh ? '確認進階' : 'Confirm Advance' }}
             </button>
           </div>
@@ -632,6 +711,17 @@ function assignPetToActiveSlot(pet: Pet) {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
+.no-selected-pet {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  height: 100%;
+  color: #fff3ca;
+  font-size: clamp(20px, 2.4vw, 34px);
+  font-weight: 1000;
+  text-align: center;
+}
+
 .pet-detail {
   display: grid;
   grid-template-columns: 134px 1fr;
@@ -921,6 +1011,22 @@ function assignPetToActiveSlot(pet: Pet) {
   min-height: 26px;
   padding: 2px 9px;
   font-size: 12px;
+}
+
+.skill-point-row button:disabled {
+  color: #7c6b58;
+  cursor: not-allowed;
+  background: linear-gradient(#d8c3a2, #b9a181);
+  border-color: #7b5b3a;
+}
+
+.nurture-message {
+  min-height: 22px;
+  margin: 0;
+  color: #26582b;
+  font-size: 12px;
+  font-weight: 1000;
+  text-align: center;
 }
 
 .skill-point-meter {

@@ -1,50 +1,35 @@
-<script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { pets } from '@/data/pets'
+﻿<script setup lang="ts">
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { pets, type Pet } from '@/data/pets'
 import { expeditionTeamPets } from '@/state/expeditionTeam'
-import boboImage from '@/assets/capybaras/bobo.png'
-import capySanImage from '@/assets/capybaras/capy-san.png'
-import kokoImage from '@/assets/capybaras/koko.png'
-import yuzuBoyImage from '@/assets/capybaras/yuzu-boy.png'
-import yuzuBiteOne from '@/assets/goodies/yuzu-bite-1.png'
-import yuzuBiteTwo from '@/assets/goodies/yuzu-bite-2.png'
-import yuzuBiteThree from '@/assets/goodies/yuzu-bite-3.png'
-import yuzuBiteFour from '@/assets/goodies/yuzu-bite-4.png'
+import { grantSkillPoints } from '@/state/testProgress'
+import { petImages, yuzuBiteFrames } from '@/content/gameAssets'
 import orangeMap from '@/assets/map/orange.png'
 import { isZh } from '@/i18n'
+import {
+  expeditionForests,
+  petElementMeta,
+  type ExpeditionForest,
+  type StoryBeat,
+  type StoryCheckOperator,
+  type StoryCondition,
+} from '@cryptopets/game-content'
 
-const elementMeta = {
-  citrus: {
-    mark: 'C',
-    label: { zh: '柑橘', en: 'Citrus' },
-    className: 'is-citrus',
-  },
-  ember: {
-    mark: 'E',
-    label: { zh: '火焰', en: 'Ember' },
-    className: 'is-ember',
-  },
-  frost: {
-    mark: 'F',
-    label: { zh: '冰霜', en: 'Frost' },
-    className: 'is-frost',
-  },
-  bloom: {
-    mark: 'B',
-    label: { zh: '花園', en: 'Bloom' },
-    className: 'is-bloom',
-  },
-}
+const elementMeta = petElementMeta
 
 const text = computed(() => ({
-  activeExpedition: isZh.value ? '遠征任務' : 'ACTIVE EXPEDITION',
-  missionName: isZh.value ? '遠古森林任務' : 'Ancient Forest Mission',
+  activeExpedition: isZh.value ? '遠征狀態' : 'EXPEDITION STATUS',
+  missionName: isZh.value ? '選擇一座森林' : 'Choose a forest',
   progress: isZh.value ? '進度' : 'PROGRESS',
-  progressValue: isZh.value ? '第 7 / 14 天' : 'Day 7/14',
+  ready: isZh.value ? '待命' : 'READY',
   nextEvent: isZh.value ? '下一事件' : 'NEXT EVENT',
-  nextEventValue: isZh.value ? '尋找巨大柚子！(1 小時 12 分)' : 'Find the Gigantic Yuzu! (1h 12m)',
   goal: isZh.value ? '目標' : 'GOAL',
-  goalValue: isZh.value ? '金色毛球（剩餘 7 天）' : 'Golden Pompom (7 days left)',
+  chooseForest: isZh.value ? '選擇森林' : 'CHOOSE FOREST',
+  start: isZh.value ? '開始探索' : 'Start',
+  complete: isZh.value ? '完成探索' : 'Complete',
+  exploring: isZh.value ? '探索中' : 'Exploring',
+  completed: isZh.value ? '可回報' : 'Ready to report',
+  locked: isZh.value ? '探索完成前無法選擇下一座森林' : 'Choose the next forest after this expedition completes',
   currentStatus: isZh.value ? '目前狀態' : 'Current Status',
   expeditionLog: isZh.value ? '遠征紀錄' : 'EXPEDITION LOG',
   partyTitle: isZh.value ? '寵物隊伍能力總覽' : 'PET PARTY STATS & OVERVIEW',
@@ -53,21 +38,101 @@ const text = computed(() => ({
   exp: isZh.value ? '經驗' : 'EXP',
 }))
 
-const petImages: Record<string, string> = {
-  'PET-001': capySanImage,
-  'PET-002': yuzuBoyImage,
-  'PET-003': kokoImage,
-  'PET-004': boboImage,
+const fruitFrames = yuzuBiteFrames
+type ForestId = ExpeditionForest['id']
+type ForestOption = ExpeditionForest
+
+interface ExpeditionLogEntry {
+  at: number
+  message: string
+  variant?: 'notice'
 }
 
-const fruitFrames = [yuzuBiteOne, yuzuBiteTwo, yuzuBiteThree, yuzuBiteFour]
+interface ExpeditionRecord {
+  id: ForestId
+  startedAt: number
+  finishAt: number
+  logs: ExpeditionLogEntry[]
+}
+
+const expeditionStorageKey = 'crypto-pets-local-expedition'
+const expeditionHistoryStorageKey = 'crypto-pets-local-expedition-history'
+const forestOptions: ForestOption[] = expeditionForests
 
 const fruitFrameIndex = ref(0)
+const logLinesElement = ref<HTMLElement | null>(null)
+const now = ref(Date.now())
+const activeExpedition = ref<ExpeditionRecord | null>(loadStoredExpedition())
+const expeditionHistory = ref<ExpeditionLogEntry[]>(loadStoredExpeditionHistory())
 let fruitTimer: number | undefined
+let clockTimer: number | undefined
 let fruitCycleStarted = 0
 const fruitCycleDuration = 12800
 
 const fruitImage = computed(() => fruitFrames[fruitFrameIndex.value])
+const selectedForest = computed(() => forestOptions.find((forest) => forest.id === activeExpedition.value?.id) ?? null)
+const teamPower = computed(() => {
+  const team = expeditionTeamPets.value.length > 0 ? expeditionTeamPets.value : pets
+  const total = team.reduce((sum, pet) => sum + pet.stats.hp + pet.stats.atk * 1.4 + pet.stats.def * 1.2 + pet.stage * 12, 0)
+
+  return Math.round(total / Math.max(1, team.length))
+})
+const expeditionProgress = computed(() => {
+  if (!activeExpedition.value) {
+    return 0
+  }
+
+  const total = activeExpedition.value.finishAt - activeExpedition.value.startedAt
+  const elapsed = now.value - activeExpedition.value.startedAt
+
+  return Math.min(100, Math.max(0, Math.round((elapsed / total) * 100)))
+})
+const remainingTime = computed(() => {
+  if (!activeExpedition.value) {
+    return text.value.ready
+  }
+
+  const seconds = Math.max(0, Math.ceil((activeExpedition.value.finishAt - now.value) / 1000))
+  const minutes = Math.floor(seconds / 60)
+  const restSeconds = seconds % 60
+
+  return `${minutes}:${String(restSeconds).padStart(2, '0')}`
+})
+const isExpeditionComplete = computed(() => Boolean(activeExpedition.value && now.value >= activeExpedition.value.finishAt))
+const missionName = computed(() => selectedForest.value ? displayForestName(selectedForest.value) : text.value.missionName)
+const missionGoal = computed(() => selectedForest.value ? selectedForest.value.reward : text.value.chooseForest)
+const missionStatus = computed(() => {
+  if (!activeExpedition.value) {
+    return text.value.ready
+  }
+
+  return isExpeditionComplete.value ? text.value.completed : text.value.exploring
+})
+const currentStatusTitle = computed(() => {
+  if (!selectedForest.value) {
+    return text.value.currentStatus
+  }
+
+  return isZh.value
+    ? `${selectedForest.value.name.zh}開始了`
+    : `${selectedForest.value.name.en} started`
+})
+const visibleLogEntries = computed(() => {
+  const activeLogs = activeExpedition.value?.logs.filter((log) => log.at <= now.value) ?? []
+
+  return [...activeLogs, ...expeditionHistory.value]
+    .sort((logA, logB) => logB.at - logA.at)
+    .slice(0, 24)
+    .sort((logA, logB) => logA.at - logB.at)
+})
+
+function scrollLogToLatest() {
+  void nextTick(() => {
+    if (logLinesElement.value) {
+      logLinesElement.value.scrollTop = logLinesElement.value.scrollHeight
+    }
+  })
+}
 
 function syncFruitFrame() {
   const progress = ((performance.now() - fruitCycleStarted) % fruitCycleDuration) / fruitCycleDuration
@@ -83,15 +148,227 @@ function syncFruitFrame() {
   }
 }
 
+function displayForestName(forest: ForestOption) {
+  return isZh.value ? forest.name.zh : forest.name.en
+}
+
+function displayForestSummary(forest: ForestOption) {
+  return isZh.value ? forest.summary.zh : forest.summary.en
+}
+
+function loadStoredExpedition(): ExpeditionRecord | null {
+  window.localStorage.removeItem(expeditionStorageKey)
+  return null
+}
+
+function loadStoredExpeditionHistory() {
+  window.localStorage.removeItem(expeditionHistoryStorageKey)
+  return []
+}
+
+function saveStoredExpedition(record: ExpeditionRecord | null) {
+  void record
+}
+
+function saveStoredExpeditionHistory(entries: ExpeditionLogEntry[]) {
+  void entries
+}
+
+function formatLogTime(timestamp: number) {
+  const date = new Date(timestamp)
+  const month = date.getMonth() + 1
+  const day = date.getDate()
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+
+  return `${month}/${day} ${hours}:${minutes}`
+}
+
+function petLevel(pet: Pet) {
+  return pet.level
+}
+
+function incrementExpeditionTeamLevels() {
+  const teamIds = new Set(expeditionTeamPets.value.map((pet) => pet.id))
+  let levelUps = 0
+
+  pets.forEach((pet) => {
+    if (teamIds.has(pet.id)) {
+      pet.level += 1
+      levelUps += 1
+      pet.exp.current = pet.level
+      pet.exp.next = Math.max(pet.exp.next, pet.level + 1)
+    }
+  })
+
+  grantSkillPoints(levelUps)
+}
+
+function abilityNote(forest: ForestOption) {
+  const power = teamPower.value
+  const requiredPower = 185 + forest.difficulty * 35
+
+  if (power >= requiredPower) {
+    return isZh.value ? '隊伍能力高於需求，事件處理得很順。' : 'The party outmatched the route and handled events smoothly.'
+  }
+
+  if (power >= requiredPower - 30) {
+    return isZh.value ? '隊伍能力接近需求，途中有些吃力但仍能穩住。' : 'The party was close to the requirement, strained but steady.'
+  }
+
+  return isZh.value ? '隊伍能力低於建議值，事件結果會偏保守。' : 'The party was below the suggested score, so outcomes stayed conservative.'
+}
+
+function currentExpeditionTeam() {
+  return expeditionTeamPets.value.length > 0 ? expeditionTeamPets.value : pets
+}
+
+function teamMetricValue(metric: NonNullable<StoryCondition['metric']>) {
+  const team = currentExpeditionTeam()
+
+  if (metric === 'teamPower') {
+    return Math.round(team.reduce((sum, pet) => sum + pet.stats.hp + pet.stats.atk * 1.4 + pet.stats.def * 1.2 + pet.stage * 12, 0))
+  }
+
+  if (metric === 'teamHp') {
+    return team.reduce((sum, pet) => sum + pet.stats.hp, 0)
+  }
+
+  if (metric === 'teamAtk') {
+    return team.reduce((sum, pet) => sum + pet.stats.atk, 0)
+  }
+
+  return team.reduce((sum, pet) => sum + pet.stats.def, 0)
+}
+
+function compareStoryValue(actual: number, operator: StoryCheckOperator, expected: number) {
+  if (operator === 'gt') {
+    return actual > expected
+  }
+
+  if (operator === 'lte') {
+    return actual <= expected
+  }
+
+  if (operator === 'lt') {
+    return actual < expected
+  }
+
+  return actual >= expected
+}
+
+function storyConditionMatches(condition?: StoryCondition) {
+  if (!condition) {
+    return true
+  }
+
+  const leader = currentExpeditionTeam()[0]
+
+  if (condition.leaderElement && leader?.element !== condition.leaderElement) {
+    return false
+  }
+
+  if (condition.metric && condition.operator && typeof condition.value === 'number') {
+    return compareStoryValue(teamMetricValue(condition.metric), condition.operator, condition.value)
+  }
+
+  return true
+}
+
+function storyBeatMessage(event: StoryBeat) {
+  const outcome = event.outcomes.find((entry) => storyConditionMatches(entry.condition)) ?? event.outcomes[0]
+  const setup = isZh.value ? event.setup.zh : event.setup.en
+  const result = outcome ? (isZh.value ? outcome.text.zh : outcome.text.en) : ''
+
+  return result ? `${setup} ${result}` : setup
+}
+
+function buildExpeditionLogs(forest: ForestOption, startedAt: number): ExpeditionLogEntry[] {
+  const teamNames = expeditionTeamPets.value.map((pet) => pet.name).join('、') || 'Capybara Team'
+  const eventGap = forest.durationSeconds / (forest.scriptEvents.length + 1)
+  const firstEntry = {
+    at: startedAt,
+    message: isZh.value
+      ? `${teamNames} 選擇${forest.name.zh}劇本。隊伍評分 ${teamPower.value}，難度 ${forest.difficulty}。${abilityNote(forest)}`
+      : `${teamNames} chose the ${forest.name.en} script. Team score ${teamPower.value}, difficulty ${forest.difficulty}. ${abilityNote(forest)}`,
+  }
+  const scriptEntries = forest.scriptEvents.map((event, index) => ({
+    at: startedAt + Math.round(eventGap * (index + 1) * 1000),
+    message: storyBeatMessage(event),
+  }))
+  const finishEntry = {
+    at: startedAt + forest.durationSeconds * 1000,
+    message: isZh.value
+      ? `${forest.name.zh}劇本完成，遠征隊帶回 ${forest.reward}。`
+      : `${forest.name.en} script completed. The party returned with ${forest.reward}.`,
+  }
+
+  return [firstEntry, ...scriptEntries, finishEntry]
+}
+
+function startExpedition(forest: ForestOption) {
+  if (activeExpedition.value) {
+    return
+  }
+
+  const startedAt = Date.now()
+  const record: ExpeditionRecord = {
+    id: forest.id,
+    startedAt,
+    finishAt: startedAt + forest.durationSeconds * 1000,
+    logs: buildExpeditionLogs(forest, startedAt),
+  }
+
+  activeExpedition.value = record
+  saveStoredExpedition(record)
+}
+
+function completeExpedition() {
+  if (!activeExpedition.value || !isExpeditionComplete.value || !selectedForest.value) {
+    return
+  }
+
+  expeditionHistory.value = [...activeExpedition.value.logs, ...expeditionHistory.value]
+    .sort((logA, logB) => logB.at - logA.at)
+    .slice(0, 24)
+    .sort((logA, logB) => logA.at - logB.at)
+  incrementExpeditionTeamLevels()
+  saveStoredExpeditionHistory(expeditionHistory.value)
+  activeExpedition.value = null
+  saveStoredExpedition(null)
+}
+
+function syncCompletedExpedition() {
+  if (activeExpedition.value && Date.now() >= activeExpedition.value.finishAt) {
+    completeExpedition()
+  }
+}
+
 onMounted(() => {
+  syncCompletedExpedition()
+  scrollLogToLatest()
   fruitCycleStarted = performance.now()
   syncFruitFrame()
   fruitTimer = window.setInterval(syncFruitFrame, 120)
+  clockTimer = window.setInterval(() => {
+    now.value = Date.now()
+    syncCompletedExpedition()
+  }, 1000)
 })
+
+watch(
+  () => visibleLogEntries.value[visibleLogEntries.value.length - 1]?.at,
+  () => {
+    scrollLogToLatest()
+  },
+)
 
 onUnmounted(() => {
   if (fruitTimer) {
     window.clearInterval(fruitTimer)
+  }
+  if (clockTimer) {
+    window.clearInterval(clockTimer)
   }
 })
 </script>
@@ -113,10 +390,26 @@ onUnmounted(() => {
 
     <div class="expedition-grid">
       <section class="animation-panel" aria-label="Capybara party exploring a forest">
-        <div class="forest-scene" :style="{ '--scene-map': `url(${orangeMap})` }">
+        <div class="forest-scene">
+          <img class="scene-map-image" :src="orangeMap" alt="" draggable="false" />
           <div class="mission-header">
             <strong>{{ text.activeExpedition }}:</strong>
-            <span>{{ text.missionName }}</span>
+            <span>{{ missionName }}</span>
+          </div>
+          <div v-if="!activeExpedition" class="scene-forest-picker">
+            <button
+              v-for="forest in forestOptions"
+              :key="forest.id"
+              class="forest-choice"
+              :class="`forest-${forest.id}`"
+              type="button"
+              @click="startExpedition(forest)"
+            >
+              <strong>{{ displayForestName(forest) }}</strong>
+              <span>{{ displayForestSummary(forest) }}</span>
+              <small>Lv. {{ forest.difficulty }} · {{ forest.durationSeconds }}s · {{ forest.reward }}</small>
+              <b>{{ text.start }}</b>
+            </button>
           </div>
           <div class="sunbeam"></div>
           <div class="castle"></div>
@@ -145,25 +438,25 @@ onUnmounted(() => {
           <div class="mission-footer">
             <div class="mission-stat progress-stat">
               <strong>{{ text.progress }}:</strong>
-              <span>{{ text.progressValue }}</span>
+              <span>{{ activeExpedition ? `${expeditionProgress}%` : text.ready }}</span>
               <div class="quest-progress" aria-label="Expedition progress">
-                <i></i>
+                <i :style="{ width: `${expeditionProgress}%` }"></i>
               </div>
             </div>
             <div class="mission-stat">
               <strong>{{ text.nextEvent }}:</strong>
-              <span>{{ text.nextEventValue }}</span>
+              <span>{{ activeExpedition ? remainingTime : text.chooseForest }}</span>
             </div>
             <div class="mission-stat">
               <strong>{{ text.goal }}:</strong>
-              <span>{{ text.goalValue }}</span>
+              <span>{{ missionGoal }}</span>
             </div>
           </div>
         </div>
       </section>
 
       <aside class="status-panel">
-        <h2>{{ text.currentStatus }}</h2>
+        <h2>{{ currentStatusTitle }}</h2>
         <div class="log-sheet">
           <div class="binder">
             <span></span>
@@ -171,11 +464,16 @@ onUnmounted(() => {
             <span></span>
           </div>
           <h3>{{ text.expeditionLog }}</h3>
-          <div class="log-lines" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
+          <div ref="logLinesElement" class="log-lines">
+            <p v-for="log in visibleLogEntries" :key="`${log.at}-${log.message}`" :class="{ 'is-notice': log.variant === 'notice' }">
+              <span v-if="log.variant !== 'notice'" class="log-time">{{ formatLogTime(log.at) }}</span>
+              <span class="log-message">{{ log.message }}</span>
+            </p>
+            <span v-if="visibleLogEntries.length === 0"></span>
+            <span v-if="visibleLogEntries.length === 0"></span>
+            <span v-if="visibleLogEntries.length === 0"></span>
+            <span v-if="visibleLogEntries.length === 0"></span>
+            <span class="log-bottom-spacer" aria-hidden="true"></span>
           </div>
         </div>
       </aside>
@@ -204,7 +502,7 @@ onUnmounted(() => {
             <div class="meter-block">
               <div class="level-row">
                 <span>{{ text.level }}</span>
-                <strong>{{ pet.stage * 10 + pet.stats.iv % 10 }}</strong>
+                <strong>{{ petLevel(pet) }}</strong>
               </div>
               <div class="meter">
                 <span>{{ text.hp }}:</span>
@@ -247,7 +545,7 @@ onUnmounted(() => {
 .expedition-page {
   position: relative;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) minmax(190px, auto);
   gap: 14px;
   width: min(1500px, 100%);
   height: 100%;
@@ -465,6 +763,7 @@ onUnmounted(() => {
   grid-template-columns: minmax(0, 1fr) 430px;
   gap: 24px;
   min-height: 0;
+  height: 100%;
 }
 
 .animation-panel {
@@ -483,10 +782,19 @@ onUnmounted(() => {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  background:
-    linear-gradient(180deg, rgba(255, 248, 218, 0.04), rgba(33, 49, 32, 0.12)),
-    var(--scene-map) center / cover no-repeat,
-    #9bd99d;
+  background: #8fd1bd;
+}
+
+.scene-map-image {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(1.13) saturate(1.04);
+  user-select: none;
+  pointer-events: none;
 }
 
 .mission-header {
@@ -511,6 +819,20 @@ onUnmounted(() => {
 
 .mission-header strong {
   color: #ffd36a;
+}
+
+.scene-forest-picker {
+  position: absolute;
+  inset: 44px 0 0;
+  z-index: 9;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(10px, 2vh, 18px);
+  padding: clamp(14px, 3vw, 34px);
+  background: rgba(8, 8, 8, 0.72);
+  backdrop-filter: blur(2px);
 }
 
 .forest-scene::before,
@@ -554,10 +876,10 @@ onUnmounted(() => {
 .party-row {
   position: absolute;
   right: 0;
-  bottom: 72px;
+  bottom: clamp(58px, 15%, 96px);
   left: 0;
   z-index: 4;
-  height: 120px;
+  height: clamp(90px, 24%, 142px);
 }
 
 .mission-footer {
@@ -665,7 +987,7 @@ onUnmounted(() => {
 }
 
 .scene-pet-avatar {
-  width: 132px;
+  width: clamp(118px, 13vw, 172px);
   height: auto;
   object-fit: contain;
   user-select: none;
@@ -687,7 +1009,7 @@ onUnmounted(() => {
 
 .snack-fruit {
   position: absolute;
-  bottom: 90px;
+  bottom: clamp(72px, 18%, 116px);
   left: 13%;
   z-index: 5;
   width: 94px;
@@ -709,6 +1031,7 @@ onUnmounted(() => {
 .status-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
   padding: 12px;
   background: #72c5b4;
   border: 4px solid #4b8e82;
@@ -727,6 +1050,7 @@ onUnmounted(() => {
 .log-sheet {
   position: relative;
   min-height: 0;
+  overflow: hidden;
   padding: 42px 28px 22px;
   background: linear-gradient(90deg, transparent 0 22px, #e9aaa1 22px 24px, transparent 24px), #fff7df;
   border: 3px solid #9a7045;
@@ -751,26 +1075,152 @@ onUnmounted(() => {
 }
 
 .log-sheet h3 {
-  margin: 0 0 22px;
+  margin: 0 0 18px;
   color: #80522e;
   font-size: 18px;
   font-weight: 900;
   text-align: center;
 }
 
-.log-lines {
+.forest-choice {
   display: grid;
-  gap: 18px;
-  padding-left: 20px;
+  grid-template-columns: 1fr;
+  align-content: center;
+  gap: 5px;
+  width: min(300px, 30%);
+  min-height: clamp(190px, 36vh, 260px);
+  padding: clamp(10px, 1.8vh, 16px) clamp(14px, 2.4vw, 24px);
+  color: #fff7df;
+  text-align: left;
+  cursor: pointer;
+  background: rgba(26, 22, 19, 0.86);
+  border: 3px solid rgba(255, 230, 160, 0.84);
+  border-radius: 8px;
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 247, 223, 0.18),
+    0 5px 0 rgba(0, 0, 0, 0.32);
+  transition:
+    transform 0.14s ease,
+    border-color 0.14s ease,
+    background-color 0.14s ease;
 }
 
-.log-lines span {
+.forest-choice:hover {
+  background: rgba(69, 48, 31, 0.94);
+  border-color: #ffd36a;
+  transform: translateY(-2px);
+}
+
+.forest-choice strong {
+  min-width: 0;
+  font-size: clamp(17px, 2.2vw, 25px);
+  font-weight: 1000;
+  line-height: 1.05;
+}
+
+.forest-choice span,
+.forest-choice small {
+  min-width: 0;
+  color: rgba(255, 247, 223, 0.88);
+  font-size: clamp(11px, 1.25vw, 14px);
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.forest-choice b {
+  justify-self: start;
+  min-width: 74px;
+  padding: 5px 10px;
+  color: #fff7df;
+  font-size: 13px;
+  font-weight: 1000;
+  text-align: center;
+  background: #4b8e82;
+  border: 2px solid rgba(255, 247, 223, 0.58);
+  border-radius: 7px;
+}
+
+.forest-orange {
+  border-left: 12px solid #f1a14a;
+}
+
+.forest-apple {
+  border-left: 12px solid #d96b58;
+}
+
+.forest-snow-peach {
+  border-left: 12px solid #f1a7bc;
+}
+
+.log-lines {
+  display: grid;
+  align-content: start;
+  height: 85%;
+  overflow: auto;
+  padding: 0;
+  background:
+    repeating-linear-gradient(180deg, transparent 0 35px, rgba(125, 188, 173, 0.5) 36px 37px, transparent 38px),
+    linear-gradient(90deg, transparent 0 18px, #e9aaa1 18px 20px, transparent 20px);
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.log-lines::-webkit-scrollbar {
+  display: none;
+}
+
+.log-lines > span {
   display: block;
-  height: 2px;
-  background: #c9e4d9;
+  height: 38px;
+  border-bottom: 2px solid #c9e4d9;
+}
+
+.log-lines > .log-bottom-spacer {
+  height: 50px;
+  border-bottom: 0;
+}
+
+.log-lines p {
+  display: grid;
+  gap: 2px;
+  min-height: 38px;
+  margin: 0;
+  padding: 6px 10px 6px 28px;
+  color: #4c3324;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.25;
+  background: transparent;
+  border-bottom: 1px solid rgba(125, 188, 173, 0.45);
+}
+
+.log-time {
+  color: #8a5d3c;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.log-message {
+  font-weight: 400;
+}
+
+.log-lines p.is-notice {
+  align-content: center;
+  min-height: 34px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  color: #2f6f66;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  background: rgba(114, 197, 180, 0.14);
+  border-block: 1px solid rgba(75, 142, 130, 0.32);
 }
 
 .party-panel {
+  min-height: 0;
+  overflow: hidden;
   margin-top: 0;
   padding: 12px 16px 14px;
   background: #ffe4bc;
@@ -799,6 +1249,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+  min-height: 0;
 }
 
 .pet-card {
@@ -984,10 +1435,11 @@ onUnmounted(() => {
 
 @media (max-width: 720px) {
   .expedition-page {
-    display: block;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
     width: 100%;
-    height: auto;
-    min-height: 100%;
+    height: 100%;
+    min-height: 0;
   }
 
   .happy-background {
@@ -1021,6 +1473,39 @@ onUnmounted(() => {
     min-height: 34px;
     padding: 6px 10px;
     font-size: 16px;
+  }
+
+  .scene-forest-picker {
+    inset: 34px 0 0;
+    flex-direction: column;
+    gap: 7px;
+    padding: 10px;
+  }
+
+  .forest-choice {
+    grid-template-columns: 1fr;
+    width: min(360px, 94%);
+    min-height: 58px;
+    padding: 8px 10px;
+  }
+
+  .forest-choice strong {
+    font-size: 13px;
+  }
+
+  .forest-choice small {
+    display: none;
+  }
+
+  .forest-choice span {
+    font-size: 10px;
+  }
+
+  .forest-choice b {
+    justify-self: start;
+    min-width: 58px;
+    padding: 4px 7px;
+    font-size: 11px;
   }
 
   .mission-footer {
@@ -1127,3 +1612,4 @@ onUnmounted(() => {
   }
 }
 </style>
+

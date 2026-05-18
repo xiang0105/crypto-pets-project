@@ -6,7 +6,7 @@ import type { AuthLoginResponse, AuthNonceResponse } from '@cryptopets/shared'
 import { env } from '../config/env.js'
 import { supabase } from '../config/supabase.js'
 import { HttpError } from '../utils/httpError.js'
-import { getPlayerProfile } from './playerService.js'
+import { getPlayerProfile, initializePlayerIfNeeded } from './playerService.js'
 
 const loginSchema = z.object({
   wallet: z.string().regex(/^0x[a-fA-F0-9]{40}$/),
@@ -90,6 +90,8 @@ export async function loginWithSignature(input: unknown): Promise<AuthLoginRespo
     issuer: 'cryptopets-api',
     audience: 'cryptopets-frontend',
   })
+
+  await initializePlayerIfNeeded(user.id)
 
   return {
     token,

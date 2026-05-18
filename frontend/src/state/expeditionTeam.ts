@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { pets } from '@/data/pets'
 
 const maxTeamSlots = 4
-const expeditionTeamIds = ref<string[]>(pets.slice(0, maxTeamSlots).map((pet) => pet.id))
+const expeditionTeamIds = ref<string[]>([])
 
 const expeditionTeamPets = computed(() => pets.filter((pet) => expeditionTeamIds.value.includes(pet.id)))
 
@@ -40,11 +40,16 @@ function setExpeditionTeamSlot(slotIndex: number, petId: string) {
   expeditionTeamIds.value = nextTeamIds.slice(0, maxTeamSlots)
 }
 
+function setExpeditionTeam(petIds: string[]) {
+  expeditionTeamIds.value = petIds.slice(0, maxTeamSlots)
+}
+
 export {
   expeditionTeamIds,
   expeditionTeamPets,
   isPetInExpeditionTeam,
   maxTeamSlots,
+  setExpeditionTeam,
   setExpeditionTeamSlot,
   toggleExpeditionPet,
 }
